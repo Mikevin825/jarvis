@@ -19,6 +19,7 @@ SCHEDULE_FILE = STATE_DIR / "schedule.json"
 INBOX_FILE = STATE_DIR / "inbox.json"
 AUDIT_FILE = STATE_DIR / "audit.log"
 PAUSE_FILE = STATE_DIR / "PAUSED"
+COST_FILE = STATE_DIR / "cost.json"
 
 
 def ensure_dirs() -> None:

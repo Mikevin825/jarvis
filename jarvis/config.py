@@ -116,6 +116,21 @@ class HeartbeatConfig:
 
 
 @dataclass(frozen=True)
+class RailsConfig:
+    """The safety posture, applied across everything."""
+
+    confirm_consequential: bool
+    audit_log: bool
+    show_cost: bool
+    # Tools named here require confirmation even if not flagged in code — lets
+    # the user tighten the posture without a code change.
+    extra_gated_tools: tuple = ()
+    # Tools named here are exempted from gating. Deliberately empty by default:
+    # loosening a safety rule should be an explicit, visible edit.
+    ungated_tools: tuple = ()
+
+
+@dataclass(frozen=True)
 class Config:
     assistant: AssistantConfig
     brain: BrainConfig
@@ -123,6 +138,7 @@ class Config:
     tts: TtsConfig
     voice: VoiceConfig
     heartbeat: HeartbeatConfig
+    rails: RailsConfig
     # Which providers have a usable key right now, by section.
     available_keys: dict = field(default_factory=dict)
 
@@ -145,6 +161,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     tts_raw = raw.get("tts") or {}
     voice_raw = raw.get("voice") or {}
     hb_raw = raw.get("heartbeat") or {}
+    rl_raw = raw.get("rails") or {}
 
     provider = _require(brain_raw, "provider", "brain")
     provider_block = (brain_raw.get(provider) or {})
@@ -249,5 +266,12 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
             quiet_hours_end=str(hb_raw.get("quiet_hours_end", "07:00")),
             catch_up_on_start=bool(hb_raw.get("catch_up_on_start", True)),
             checks=hb_raw.get("checks") or {},
+        ),
+        rails=RailsConfig(
+            confirm_consequential=bool(rl_raw.get("confirm_consequential", True)),
+            audit_log=bool(rl_raw.get("audit_log", True)),
+            show_cost=bool(rl_raw.get("show_cost", True)),
+            extra_gated_tools=tuple(rl_raw.get("extra_gated_tools") or ()),
+            ungated_tools=tuple(rl_raw.get("ungated_tools") or ()),
         ),
     )

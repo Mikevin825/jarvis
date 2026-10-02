@@ -186,3 +186,30 @@ heartbeat:
       # instant anything arrives is a notification, not an assistant.
       min_age_minutes: 60
       level: normal
+
+# ---------------------------------------------------------------------------
+# The rails — safety, confirmation, and the audit trail.
+#
+# This is less new machinery than a posture applied across everything: the
+# confirmation gate sits between the model choosing a tool and the tool running,
+# so it covers typed, spoken, and heartbeat-initiated actions alike.
+# ---------------------------------------------------------------------------
+rails:
+  # Hard gate on anything that sends, spends, deletes, or changes a setting.
+  # Read-only actions flow freely. Turning this off is possible but is a
+  # deliberate, visible edit — which is the point.
+  confirm_consequential: true
+
+  # Plain-text record of what ran, what was surfaced, and what was asked.
+  audit_log: true
+
+  # Running tally of model cost, so a runaway loop is visible immediately.
+  show_cost: true
+
+  # Tighten the posture without touching code: any tool named here is treated as
+  # consequential even if it is not flagged as such in the source.
+  extra_gated_tools: []
+
+  # Exempt tools from gating. Deliberately empty. Loosening a safety rule should
+  # require an explicit, visible edit, never a default.
+  ungated_tools: []

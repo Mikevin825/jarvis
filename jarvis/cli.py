@@ -15,8 +15,17 @@ import sys
 
 from .brain import Brain, Chunk, ToolRun
 from .config import ConfigError, load_config, load_dotenv
+from .cost import CostTracker
+from .gate import CliGate, DenyAllGate, NoHumanGate
 from .memory import MemoryStore
-from .paths import MEMORY_FILE
+from .paths import (
+    AUDIT_FILE,
+    COST_FILE,
+    INBOX_FILE,
+    MEMORY_FILE,
+    PAUSE_FILE,
+    SCHEDULE_FILE,
+)
 from .prompts import build_system_prompt
 from .providers import ProviderError, build_provider
 from .tools import build_registry
@@ -24,7 +33,7 @@ from .tools import build_registry
 EXIT_WORDS = {"/quit", "/exit", "/q"}
 
 
-def _build_brain() -> tuple:
+def _build_brain(gate=None) -> tuple:
     load_dotenv()
     cfg = load_config()
 
@@ -32,11 +41,16 @@ def _build_brain() -> tuple:
     store.load()
 
     provider = build_provider(cfg.brain)
-    registry = build_registry(store)
+    registry = build_registry(
+        store,
+        extra_gated=cfg.rails.extra_gated_tools,
+        ungated=cfg.rails.ungated_tools,
+    )
 
-    # Memory is injected fresh each turn rather than captured once, so a fact
-    # learned this turn is usable in the next, and a hand edit to the file is
-    # picked up without restarting.
+    # The gate is attached to the registry, so it covers every consequential
+    # action regardless of where the turn came from.
+    registry.gate = gate if gate is not None else DenyAllGate()
+
     brain = Brain(
         provider,
         build_system_prompt(cfg.assistant),
@@ -53,7 +67,13 @@ def _fmt_args(args: dict) -> str:
     return " " + " ".join(f"{k}={v!r}" for k, v in args.items())
 
 
-def _run_turn(brain: Brain, name: str, text: str, verbose_tools: bool = True) -> None:
+def _run_turn(
+    brain: Brain,
+    name: str,
+    text: str,
+    verbose_tools: bool = True,
+    tracker=None,
+) -> None:
     """Run one turn, streaming the reply to the terminal.
 
     Tool activity is shown on its own line so it is always visible what the
@@ -69,9 +89,12 @@ def _run_turn(brain: Brain, name: str, text: str, verbose_tools: bool = True) ->
                     if spoke:
                         print()
                         spoke = False
-                    status = "ok" if event.ok else "FAILED"
+                    if event.gated:
+                        status = "NEEDS YOUR OK"
+                    else:
+                        status = "ok" if event.ok else "FAILED"
                     print(f"  · {event.name}{_fmt_args(event.args)} → {status}")
-                    if not event.ok:
+                    if not event.ok and not event.gated:
                         print(f"    {event.content}")
             elif isinstance(event, Chunk):
                 if not spoke:
@@ -84,6 +107,12 @@ def _run_turn(brain: Brain, name: str, text: str, verbose_tools: bool = True) ->
             print()
         print(f"[brain unavailable] {exc}")
         return
+
+    if tracker is not None:
+        # Usage from the last provider call of the turn.
+        usage = getattr(brain, "last_usage", None)
+        if usage:
+            tracker.record(usage)
 
     if spoke:
         print()
@@ -170,10 +199,49 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="start without the background heartbeat",
     )
+    parser.add_argument(
+        "--rails",
+        action="store_true",
+        help="show the safety posture: what is gated, what the audit log holds",
+    )
+    parser.add_argument(
+        "--audit",
+        metavar="N",
+        nargs="?",
+        const=40,
+        type=int,
+        help="show the last N audit entries (default 40)",
+    )
+    parser.add_argument(
+        "--cost",
+        action="store_true",
+        help="show the model usage and cost tally",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help=(
+            "auto-approve consequential actions. Intended for scripted runs "
+            "where you have already decided — never for interactive use."
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
-        cfg, brain, store = _build_brain()
+        # The gate is chosen before the brain is built, because it is attached
+        # to the registry the brain runs tools through.
+        interactive = sys.stdin.isatty() and not args.message and not args.yes
+        if args.yes:
+            from .gate import AutoApproveGate
+
+            gate = AutoApproveGate()
+        elif interactive:
+            gate = CliGate()
+        else:
+            # Non-interactive without --yes: nobody is present to approve, so
+            # consequential actions are refused rather than assumed.
+            gate = NoHumanGate()
+        cfg, brain, store = _build_brain(gate=gate)
     except ConfigError as exc:
         print(f"configuration problem: {exc}", file=sys.stderr)
         return 2
@@ -183,14 +251,67 @@ def main(argv: list[str] | None = None) -> int:
 
     name = cfg.assistant.name
 
-    # -- heartbeat: kill switch, inbox, catch-up -----------------------------
+    # -- the rails: posture, audit trail, cost -------------------------------
     from .audit import AuditLog
     from .heartbeat import Heartbeat, Inbox, Schedule
-    from .paths import AUDIT_FILE, INBOX_FILE, PAUSE_FILE, SCHEDULE_FILE
 
-    log = AuditLog(AUDIT_FILE)
+    log = AuditLog(AUDIT_FILE, enabled=cfg.rails.audit_log)
+    tracker = CostTracker(COST_FILE, model=cfg.brain.model).load()
     hb_schedule = Schedule(SCHEDULE_FILE).load()
     inbox = Inbox(INBOX_FILE).load()
+
+    # The audit trail records what was asked for as well as what happened.
+    brain.registry.on_audit = lambda src, status, detail: log.write(
+        source=src, status=status, detail=detail
+    )
+    # Usage is recorded per provider call, so a turn that ran several tool
+    # rounds is not undercounted.
+    brain.on_usage = tracker.record
+
+    if args.rails:
+        print("Safety posture\n" + "=" * 60)
+        print(f"  confirm consequential actions: {cfg.rails.confirm_consequential}")
+        print(f"  audit log:                     {cfg.rails.audit_log}  ({AUDIT_FILE})")
+        print(f"  cost tracking:                 {cfg.rails.show_cost}")
+        print(f"  kill switch:                   {'ENGAGED' if PAUSE_FILE.exists() else 'released'}")
+        print("\nNever without asking (your list):")
+        for item in ("spend money", "send messages", "delete data", "change settings"):
+            print(f"  - {item}")
+        print("\nGated tools:")
+        for tool_name in brain.registry.consequential_names():
+            tool = brain.registry.get(tool_name)
+            print(f"  - {tool_name}: {tool.confirm_prompt or 'consequential'}")
+        extra = cfg.rails.extra_gated_tools
+        if extra:
+            print(f"\nAdditionally gated by config: {', '.join(extra)}")
+        if cfg.rails.ungated_tools:
+            print(f"Exempted by config (loosened): {', '.join(cfg.rails.ungated_tools)}")
+        print(
+            "\nEverything else — lookups, reads, opens — runs without asking."
+        )
+        return 0
+
+    if args.audit is not None:
+        lines = log.tail(args.audit)
+        if not lines:
+            print("The audit log is empty.")
+            return 0
+        print(f"Last {len(lines)} audit entries ({AUDIT_FILE}):\n")
+        for line in lines:
+            print(f"  {line}")
+        return 0
+
+    if args.cost:
+        print(f"Model: {cfg.brain.model}")
+        print(f"  session:  {tracker.summary()}")
+        lt = tracker.lifetime
+        print(
+            f"  lifetime: {lt.calls} calls, {lt.prompt_tokens:,} in / "
+            f"{lt.output_tokens:,} out, ~${lt.cost_usd:.4f}"
+        )
+        print("\nToken counts are exact from the provider; cost uses list prices")
+        print("and is an estimate. Adjust in jarvis/cost.py if your rates differ.")
+        return 0
 
     if args.pause:
         PAUSE_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -399,7 +520,12 @@ def main(argv: list[str] | None = None) -> int:
     if scripted:
         for text in scripted:
             print(f"you › {text}")
-            _run_turn(brain, name, text)
+            _run_turn(brain, name, text, tracker=tracker)
+
+        tracker.save()
+        if cfg.rails.show_cost and tracker.session.calls:
+            print(f"[{tracker.summary()}]")
+
         if args.show_transcript:
             print("\n--- transcript ---")
             for message in brain.transcript():
@@ -494,10 +620,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"(dismissed {inbox.dismiss_all()} notice(s))")
             continue
 
-        _run_turn(brain, name, text)
+        _run_turn(brain, name, text, tracker=tracker)
 
     if heartbeat is not None:
         heartbeat.stop()
+
+    tracker.save()
+    if cfg.rails.show_cost and tracker.session.calls:
+        print(f"[{tracker.summary()}]")
 
     print("Goodbye.")
     return 0

@@ -29,6 +29,7 @@ from .providers import (
     TurnEnd,
 )
 from .tools import ToolRegistry
+from .untrusted import wrap_untrusted
 
 DEFAULT_MAX_TOOL_ROUNDS = 8
 
@@ -56,6 +57,9 @@ class ToolRun:
     args: dict
     ok: bool
     content: str
+    # True when the gate blocked it, so the interface can say "declined" rather
+    # than showing it as a plain failure.
+    gated: bool = False
 
 
 BrainEvent = Chunk | ToolRun
@@ -70,6 +74,7 @@ class Brain:
         max_tool_rounds: int = DEFAULT_MAX_TOOL_ROUNDS,
         memory_selector: MemorySelector | None = None,
         prompt_builder: Callable[[str], str] | None = None,
+        on_usage: Callable[[dict], None] | None = None,
     ) -> None:
         self.provider = provider
         self.system_prompt = system_prompt
@@ -81,6 +86,9 @@ class Brain:
         # restart. Both are worth the trivial cost.
         self.memory_selector = memory_selector
         self.prompt_builder = prompt_builder
+        # Usage from the most recent provider call, for the cost tally.
+        self.last_usage: dict | None = None
+        self.on_usage = on_usage
         self.history: list[Message] = []
 
     # -- public -------------------------------------------------------------
@@ -173,9 +181,18 @@ class Brain:
                     args=call.args,
                     ok=result.ok,
                     content=result.content,
+                    gated=getattr(result, "gated", False),
                 )
+                # Everything a tool returns is content from outside this
+                # conversation, so it is wrapped and marked as data. A tool that
+                # reads a web page or a file is exactly how an instruction-shaped
+                # string would otherwise reach the model as if the user said it.
                 outputs.append(
-                    ToolOutput(name=call.name, content=result.content, ok=result.ok)
+                    ToolOutput(
+                        name=call.name,
+                        content=wrap_untrusted(result.content, f"tool:{call.name}"),
+                        ok=result.ok,
+                    )
                 )
             self.history.append(Message(role="tool", outputs=outputs))
 
@@ -190,6 +207,15 @@ class Brain:
                 yield Chunk(event.text)
             elif isinstance(event, TurnEnd):
                 end = event
+                # Record usage for every call, not just the last, so a turn
+                # that ran several tool rounds is not undercounted.
+                if event.usage:
+                    self.last_usage = event.usage
+                    if self.on_usage is not None:
+                        try:
+                            self.on_usage(event.usage)
+                        except Exception:  # noqa: BLE001
+                            pass
 
         if end is None:
             raise ProviderError("the model returned nothing at all")

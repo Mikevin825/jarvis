@@ -6,6 +6,8 @@ Adding a capability: write one self-contained module next to these and add its
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from ..memory import MemoryStore
 from . import apps, clock, memory, messages, notes, weather
 from .base import Tool, ToolError, ToolRegistry, ToolResult
@@ -16,12 +18,19 @@ __all__ = ["Tool", "ToolError", "ToolRegistry", "ToolResult", "build_registry"]
 _MODULES = (clock, weather, notes, apps, messages)
 
 
-def build_registry(memory_store: MemoryStore | None = None) -> ToolRegistry:
+def build_registry(
+    memory_store: MemoryStore | None = None,
+    extra_gated: tuple = (),
+    ungated: tuple = (),
+) -> ToolRegistry:
     """Assemble every tool.
 
     `memory_store` is passed in rather than built here so the store is a single
     shared object: the same one the brain reads from at the start of a turn is
     the one the memory tools write to.
+
+    `extra_gated` / `ungated` come from `rails` in config.yaml, so the safety
+    posture can be tightened (or deliberately loosened) without a code change.
     """
     registry = ToolRegistry()
     for module in _MODULES:
@@ -31,5 +40,17 @@ def build_registry(memory_store: MemoryStore | None = None) -> ToolRegistry:
     if memory_store is not None:
         for tool in memory.build(memory_store):
             registry.register(tool)
+
+    # Apply the config-level posture last, so it can adjust any tool.
+    for name in extra_gated:
+        tool = registry.get(name)
+        if tool is not None and not tool.consequential:
+            registry._tools[name] = replace(tool, consequential=True, confirm_prompt=(
+                tool.confirm_prompt or "you asked for this one to require confirmation"
+            ))
+    for name in ungated:
+        tool = registry.get(name)
+        if tool is not None and tool.consequential:
+            registry._tools[name] = replace(tool, consequential=False)
 
     return registry
