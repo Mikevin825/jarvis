@@ -79,7 +79,7 @@ tts:
   # "piper" — fully offline neural voices. No key, no network, very fast.
   # "elevenlabs" — the most natural of all; needs ELEVENLABS_API_KEY in .env.
   #           Check which voices your key can use with: jarvis --voices
-  provider: espeak
+  provider: elevenlabs
 
   edge:
     # Browse voices: .venv/bin/python -m edge_tts --list-voices
@@ -105,9 +105,12 @@ tts:
     rate: 165
 
   elevenlabs:
-    # Pick a voice at https://elevenlabs.io/voice-library and paste its id here.
-    voice: 21m00Tcm4TlvDq8ikWAM
-    model: eleven_turbo_v2_5
+    # George — a stock voice every account has. Voices from the public library
+    # are NOT usable via the API on a free plan: they return 402
+    # "paid_plan_required". If you upgrade, list what you can use with:
+    #   .venv/bin/python -m jarvis --voices
+    voice: JBFqnCBsd6RMkjVDRZzb
+    model: eleven_flash_v2_5
     timeout_seconds: 60
     api_key_env: ELEVENLABS_API_KEY
 

@@ -8,7 +8,7 @@ here, so tuning is an edit, not a code change.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -88,6 +88,10 @@ class TtsConfig:
     # piper
     voices_dir: str | None = None
     length_scale: float = 1.0
+    # Keys for every configured provider, not just the active one. Switching
+    # provider in config.yaml must not make an already-pasted key invisible —
+    # that is what `--voices` and a mid-conversation swap both depend on.
+    api_keys: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -107,6 +111,8 @@ class Config:
     stt: SttConfig
     tts: TtsConfig
     voice: VoiceConfig
+    # Which providers have a usable key right now, by section.
+    available_keys: dict = field(default_factory=dict)
 
 
 def _require(mapping: dict, key: str, where: str):
@@ -143,15 +149,37 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
 
     stt_provider = stt_raw.get("provider", "whisper")
     stt_block = stt_raw.get(stt_provider) or {}
-    stt_key = None
-    if stt_block.get("api_key_env"):
-        stt_key = os.environ.get(stt_block["api_key_env"])
 
     tts_provider = tts_raw.get("provider", "espeak")
     tts_block = tts_raw.get(tts_provider) or {}
-    tts_key = None
-    if tts_block.get("api_key_env"):
-        tts_key = os.environ.get(tts_block["api_key_env"])
+
+    # Resolve keys for EVERY provider block, not only the active one. A key that
+    # is present in .env must stay usable even when another provider is active —
+    # otherwise switching providers in config.yaml silently strands it.
+    def _keys_for(section: dict) -> dict[str, str]:
+        found: dict[str, str] = {}
+        for name, block in section.items():
+            if not isinstance(block, dict):
+                continue
+            env_name = block.get("api_key_env")
+            if not env_name:
+                continue
+            value = os.environ.get(env_name)
+            if value:
+                found[name] = value
+        return found
+
+    stt_keys = _keys_for(stt_raw)
+    tts_keys = _keys_for(tts_raw)
+
+    stt_key = stt_keys.get(stt_provider)
+    tts_key = tts_keys.get(tts_provider)
+
+    available_keys = {
+        "brain": {provider: bool(api_key)},
+        "stt": {name: True for name in stt_keys},
+        "tts": {name: True for name in tts_keys},
+    }
 
     return Config(
         assistant=AssistantConfig(
@@ -189,6 +217,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
             pitch=str(tts_block.get("pitch", "+0Hz")),
             voices_dir=tts_block.get("voices_dir"),
             length_scale=float(tts_block.get("length_scale", 1.0)),
+            api_keys=tts_keys,
         ),
         voice=VoiceConfig(
             ptt_key=str(voice_raw.get("ptt_key", "space")).lower(),
@@ -198,4 +227,5 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
             thinking_cue=bool(voice_raw.get("thinking_cue", True)),
             min_sentence_chars=int(voice_raw.get("min_sentence_chars", 2)),
         ),
+        available_keys=available_keys,
     )

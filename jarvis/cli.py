@@ -141,14 +141,17 @@ def main(argv: list[str] | None = None) -> int:
         from .voice import SpeechError
         from .voice.tts import ElevenLabsSpeaker
 
-        if not cfg.tts.api_key:
+        # Read the key from the provider block, not the active provider — the
+        # point of this command is to check a key before switching to it.
+        key = cfg.tts.api_keys.get("elevenlabs")
+        if not key:
             print(
                 "No ELEVENLABS_API_KEY found in .env, so there are no voices to "
-                "list. Add your key and try again.",
+                "list.\n  Add it to ~/jarvis/.env as:  ELEVENLABS_API_KEY=sk_...",
                 file=sys.stderr,
             )
             return 2
-        speaker = ElevenLabsSpeaker(cfg.tts.api_key, voice_id=cfg.tts.voice)
+        speaker = ElevenLabsSpeaker(key, voice_id=cfg.tts.voice)
         try:
             voices = speaker.list_voices()
         except SpeechError as exc:
