@@ -24,6 +24,7 @@ const audioToggle = document.getElementById("audio-toggle")!;
 const perfToggle = document.getElementById("perf-toggle")!;
 const motionToggle = document.getElementById("motion-toggle")!;
 const micToggle = document.getElementById("mic-toggle")!;
+const themeToggle = document.getElementById("theme-toggle")!;
 
 const engine = new GalaxyEngine(canvas, {
   reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
@@ -42,7 +43,24 @@ for (const state of STATES) {
   button.textContent = state;
   button.dataset.state = state;
   button.setAttribute("aria-pressed", String(state === "idle"));
+  button.setAttribute("role", "radio");
+  button.tabIndex = state === "idle" ? 0 : -1;
   button.addEventListener("click", () => selectState(state));
+  button.addEventListener("keydown", (e) => {
+    const buttons = Array.from(stateButtons.querySelectorAll("button"));
+    const idx = buttons.indexOf(button);
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      const next = buttons[(idx + 1) % buttons.length];
+      next.focus();
+      selectState(next.dataset.state as AiState);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const prev = buttons[(idx - 1 + buttons.length) % buttons.length];
+      prev.focus();
+      selectState(prev.dataset.state as AiState);
+    }
+  });
   stateButtons.append(button);
 }
 
@@ -79,14 +97,25 @@ motionToggle.addEventListener("click", () => {
   motionToggle.setAttribute("aria-pressed", String(reducedMotion));
 });
 
+let theme = "dark";
+themeToggle.addEventListener("click", () => {
+  theme = theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = theme;
+  themeToggle.textContent = `theme: ${theme}`;
+  themeToggle.setAttribute("aria-pressed", String(theme === "light"));
+});
+
 let micEnabled = true;
 micToggle.addEventListener("click", () => {
   micEnabled = !micEnabled;
   micToggle.textContent = `mic: ${micEnabled ? "on" : "off"}`;
   micToggle.setAttribute("aria-pressed", String(micEnabled));
   if (useRealAudio) {
-    capture.stop();
-    void capture.start();
+    if (micEnabled) {
+      void capture.start();
+    } else {
+      capture.stop();
+    }
   }
 });
 
@@ -136,7 +165,7 @@ window.addEventListener("resize", () => engine.resize());
 
 // Start audio capture on first user interaction (browsers require this).
 const startAudio = (): void => {
-  if (useRealAudio) {
+  if (useRealAudio && micEnabled) {
     void capture.start();
   }
   window.removeEventListener("click", startAudio);

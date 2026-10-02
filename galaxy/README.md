@@ -44,7 +44,7 @@ bugs below findable.
 | 2 | The sky — nebula, stars, bloom | ✅ done |
 | 3 | The star network — clusters, connections, dust | ✅ done |
 | 4 | States and voice — real audio taps | ✅ done |
-| 5 | Themes, performance, accessibility | ⬜ (perf + reduced motion done) |
+| 5 | Themes, performance, accessibility | ✅ done |
 
 ## Two bugs worth remembering
 
