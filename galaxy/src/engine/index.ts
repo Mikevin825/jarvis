@@ -15,6 +15,8 @@ import { AnimationClock, approachAll } from "./easing";
 import type { AudioLevels } from "./audio";
 import { Orb } from "./orb";
 import { Sky } from "./sky";
+import { StarNetwork } from "./network";
+import { generateNetwork } from "./network/generate";
 import {
   DEFAULT_RATES,
   STATE_TABLE,
@@ -42,6 +44,7 @@ export class GalaxyEngine {
   private scene = new THREE.Scene();
   private orbCamera: THREE.PerspectiveCamera;
   private sky: Sky;
+  private network: StarNetwork;
   private orb: Orb;
   private clock = new AnimationClock();
 
@@ -82,8 +85,20 @@ export class GalaxyEngine {
     this.sky = new Sky();
     this.scene.add(this.sky.mesh);
 
+    const layout = generateNetwork({ seed: 1337, starCount: this.performance ? 120 : 220 });
+    this.network = new StarNetwork(layout, this.performance ? 1 : 2);
+    this.scene.add(this.network.group);
+
     this.orb = new Orb(this.performance ? 12 : 24);
     this.scene.add(this.orb.group);
+
+    // All three groups share one camera. Layers control draw order via
+    // renderOrder: sky (renderOrder -1000) → network (-500) → orb (0).
+    // A single render pass is cheaper than three and avoids redundant
+    // full-scene work.
+    this.orbCamera.layers.enable(0);
+    this.orbCamera.layers.enable(1);
+    this.orbCamera.layers.enable(2);
 
     this.targets = { ...STATE_TABLE.idle };
     this.resize();
@@ -150,6 +165,7 @@ export class GalaxyEngine {
   dispose(): void {
     this.stop();
     this.sky.dispose();
+    this.network.dispose();
     this.orb.dispose();
     this.renderer.dispose();
   }
@@ -183,14 +199,10 @@ export class GalaxyEngine {
   private render(elapsed: number): void {
     this.renderer.clear();
 
-    // Pass 1 — the sky. Full-screen quad, depth testing off.
+    // Update all three groups, then render once. Draw order is controlled by
+    // renderOrder: sky (-1000) → network (-500) → orb (0).
     this.sky.update(elapsed, this.targets, this.levels.voice);
-
-    // Pass 3 — the star network will be drawn here, between sky and orb.
-
-    // Pass 4 — the orb, on its own camera, over a cleared depth buffer.
-    this.renderer.clearDepth();
-
+    this.network.update(elapsed, this.targets);
     this.orb.update({
       elapsed,
       targets: this.targets,
@@ -225,6 +237,7 @@ export class GalaxyEngine {
     this.performance = enabled;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, enabled ? 1 : 2));
     this.orb.setDetail(enabled ? 12 : 24);
+    this.network.setPixelRatio(enabled ? 1 : 2);
     this.onPerformanceChange?.(enabled);
   }
 }

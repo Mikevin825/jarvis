@@ -23,6 +23,7 @@ src/engine/
   easing.ts       frame-rate independent smoothing
   audio.ts        frequency bins -> voice/bass/treble, plus a synthetic fallback
   orb.ts          the orb, glow shell and rings (draws only)
+  network/        star network generation (pure) + scene object (draws only)
   index.ts        one renderer, one context, the frame loop
   shaders/        GLSL: simplex noise, the orb, the glow shell
 src/demo/         the demo page: state buttons and toggles
@@ -41,8 +42,7 @@ bugs below findable.
 |---|---|---|
 | 1 | The orb — wireframe icosahedron, noise displacement, fresnel, glow shell, rings | ✅ done |
 | 2 | The sky — nebula, stars, bloom | ✅ done |
-| 2 | The sky — nebula, stars, bloom | ✅ done |
-| 3 | The star network — clusters, connections, dust | ⬜ |
+| 3 | The star network — clusters, connections, dust | ✅ done |
 | 4 | States and voice — real audio taps | ⬜ (table and synthetic path done) |
 | 5 | Themes, performance, accessibility | ⬜ (perf + reduced motion done) |
 
