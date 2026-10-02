@@ -37,15 +37,24 @@ These are the first tools and the first test cases. Everything else comes later.
 | Language | **Python 3.14** | Boring, well-supported, good audio + HTTP libraries. |
 | Runtime | Local venv at `jarvis/.venv` | Self-contained; no global installs. |
 | Framework | **None** | Small, readable harness. Stdlib + `httpx` + `pyyaml` only. |
-| Brain provider | **Gemini 3 Pro** (`gemini-3.1-pro-preview`) via the REST API | Chosen by user. Behind a thin provider seam so it can be swapped. |
+| Brain provider | **Gemini** (`gemini-3.6-flash`) via the REST API | Chosen by user (Gemini 3 Pro). Behind a thin provider seam so it can be swapped. |
 | Model name | In `config.yaml` | Not hardcoded — one-line change to swap models. |
 | STT | Deepgram (Tier 3) | Fast, accurate, streams. Behind its own seam. |
 | TTS | ElevenLabs (Tier 3) | Natural voice, streams. Behind its own seam. |
 
-> **Note on the model ID:** the user asked for "Gemini 3 Pro". The old
-> `gemini-3-pro-preview` endpoint has been **shut down** by Google; the current
-> Pro-family endpoint is `gemini-3.1-pro-preview`. The model lives in
-> `config.yaml`, so this is a one-line change if a newer ID appears.
+> **Note on the model ID.** The user asked for **Gemini 3 Pro**. Two problems
+> were found and verified against the live API with this key:
+>
+> 1. `gemini-3-pro-preview` has been **shut down** by Google.
+> 2. Its replacement, `gemini-3.1-pro-preview`, is visible to the key but has
+>    **zero quota on a free-tier plan** — every call returns
+>    `429 RESOURCE_EXHAUSTED`. The key itself is fine.
+>
+> Verified working on this key: **`gemini-3.6-flash`** and `gemini-3.5-flash`.
+> `gemini-3.8-flash` / `3.7-flash` were returning `503` (provider overload) at
+> the time of writing. So the default is `gemini-3.6-flash` — same Gemini 3
+> family, and it actually answers. Because the model lives in `config.yaml`,
+> moving to a Pro model is a **one-line change** once Pro quota is available.
 
 ## Where it runs
 

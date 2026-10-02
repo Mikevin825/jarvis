@@ -25,10 +25,15 @@ brain:
   timeout_seconds: 60
 
   gemini:
-    # NOTE: "gemini-3-pro-preview" has been shut down by Google. The current
-    # Pro-family endpoint is gemini-3.1-pro-preview. Swap this one line when a
-    # newer ID ships.
-    model: gemini-3.1-pro-preview
+    # Gemini 3 Pro was requested, but on a free-tier key the Pro preview model
+    # has NO quota — every call returns 429 RESOURCE_EXHAUSTED, and its earlier
+    # endpoint (gemini-3-pro-preview) has been shut down by Google. Verified on
+    # this key: gemini-3.6-flash and gemini-3.5-flash respond; the 3.8/3.7
+    # Flash models are currently 503 (high demand).
+    #
+    # Swap this one line when Pro quota is available on your plan — the model
+    # name lives here precisely so that is a one-line change.
+    model: gemini-3.6-flash
     api_key_env: GEMINI_API_KEY
     base_url: https://generativelanguage.googleapis.com/v1beta
 

@@ -122,7 +122,22 @@ class GeminiProvider:
         elif response.status_code == 404:
             hint = "the model name may be wrong or retired — see config.yaml"
         elif response.status_code == 429:
-            hint = "rate limited — wait a moment and try again"
+            # Two very different causes, and they need different fixes. The
+            # per-model case is the one that bites: a key can be perfectly
+            # valid and still have zero quota for a given model.
+            if "quota" in detail.lower():
+                hint = (
+                    f"no quota for '{self.model}' on this key's tier. This is a "
+                    "per-model limit, not a broken key — try a different model "
+                    "in config.yaml (brain.gemini.model)"
+                )
+            else:
+                hint = "rate limited — wait a moment and try again"
+        elif response.status_code == 503:
+            hint = (
+                f"'{self.model}' is temporarily overloaded at the provider — "
+                "try again shortly, or pick another model in config.yaml"
+            )
         elif response.status_code >= 500:
             hint = "the provider is having trouble — try again shortly"
         else:
