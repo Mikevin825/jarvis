@@ -250,7 +250,10 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
             api_keys=tts_keys,
         ),
         voice=VoiceConfig(
-            ptt_key=str(voice_raw.get("ptt_key", "space")).lower(),
+            # Default must match VoiceConfig's own default. It is F9, not space:
+            # a bare space fires on every keystroke once this runs outside a
+            # terminal, which is exactly what happened when it was backgrounded.
+            ptt_key=str(voice_raw.get("ptt_key", "f9")).lower(),
             interrupt_key=str(voice_raw.get("interrupt_key", "esc")).lower(),
             speak_replies=bool(voice_raw.get("speak_replies", True)),
             show_transcript=bool(voice_raw.get("show_transcript", True)),

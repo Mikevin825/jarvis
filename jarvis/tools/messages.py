@@ -68,6 +68,11 @@ def _save(store: dict) -> None:
 
 
 def list_messages(unread_only: bool = False) -> str:
+    """List inbox messages.
+
+    The inbox is a local file. There is no connected mail account, so this is
+    whatever has been placed there — not the user's real email.
+    """
     store = _load()
     inbox = store.get("inbox", [])
     if unread_only:
@@ -131,7 +136,13 @@ def list_drafts() -> str:
 
 
 def send_message(draft_id: str | None = None, to: str | None = None, body: str | None = None) -> str:
-    """Send a message. Consequential — never runs without confirmation."""
+    """Send a message. Consequential — never runs without confirmation.
+
+    IMPORTANT — this does not actually send anything. It moves a draft into the
+    local outbox file. The tool result says so in as many words, because a model
+    that believes a message went out will tell the user it went out. Overstating
+    what happened is worse than the missing capability.
+    """
     store = _load()
 
     if draft_id:
@@ -154,11 +165,17 @@ def send_message(draft_id: str | None = None, to: str | None = None, body: str |
             "to": to,
             "subject": subject,
             "body": body,
-            "sent": datetime.now().isoformat(timespec="seconds"),
+            "queued": datetime.now().isoformat(timespec="seconds"),
+            "delivered": False,
         }
     )
     _save(store)
-    return f"Sent the message to {to}."
+    return (
+        f"Queued in the local outbox: to {to}. "
+        "NOT DELIVERED — this build has no mail or messaging account connected, "
+        "so nothing left this machine. Tell the user it is sitting in the outbox "
+        "and has not been sent to anyone."
+    )
 
 
 def build() -> list[Tool]:
@@ -166,8 +183,10 @@ def build() -> list[Tool]:
         Tool(
             name="list_messages",
             description=(
-                "Use this to see the messages in the user's inbox. Call it when "
-                "the user asks what messages or email they have."
+                "Use this to see messages in the local inbox file. NOTE: no mail "
+                "or messaging account is connected in this build, so this is NOT "
+                "the user's real email — it is a local store. Call it when the "
+                "user asks what messages they have, and be clear about that."
             ),
             parameters=_PARAMS_LIST,
             func=list_messages,
@@ -204,12 +223,19 @@ def build() -> list[Tool]:
         Tool(
             name="send_message",
             description=(
-                "Use this to actually send a message to someone. This is "
-                "irreversible and requires the user's explicit confirmation first."
+                "Use this to move a drafted message into the outbox. NOTE: this "
+                "build has NO mail or messaging account connected, so this does "
+                "not deliver anything to anyone — it only writes the message to "
+                "the local outbox file. Always tell the user it was queued and "
+                "not sent. Requires the user's explicit confirmation first."
             ),
             parameters=_PARAMS_SEND,
             func=send_message,
             consequential=True,
-            confirm_prompt="sends a message to another person under the user's name, and cannot be unsent",
+            confirm_prompt=(
+                "queues a message in the local outbox. This build has no mail or "
+                "messaging account connected, so nothing will actually be "
+                "delivered to anyone"
+            ),
         ),
     ]

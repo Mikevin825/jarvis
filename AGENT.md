@@ -500,6 +500,79 @@ same two properties as the CLI gate:
 
 Verified end to end: model → gate → window → click *Allow* → the action ran.
 
+## Personality
+
+The voice lives in **`personality.md`** — plain prose, re-read on every turn. Edit
+it, save it, and the very next reply uses it. No restart.
+
+```bash
+jarvis --personality     # show the file and the per-turn cue
+```
+
+### Why it is written as examples, not adjectives
+
+"Crisp and professional" tells a model nothing. Eight lines it should sound like,
+and nine it must never produce, tell it everything. The file is organised as:
+
+- **Sound like this** — concrete one-liners the model can imitate.
+- **Never sound like this** — the customer-service openers that make an assistant
+  feel like a call-centre script.
+- **Boundaries** — the confirmation rules and the data-not-instructions posture,
+  restated in voice so they read as character rather than policy.
+
+### The drift problem, and the fix
+
+A strong personality on turn one slides toward generic-assistant mode by turn
+ten. This is not a bug in the prompt — it is how attention works. As history
+grows, the assistant's *own prior replies* become the strongest behavioural
+signal and progressively outweigh the personality block at the top of the system
+prompt. Once one reply says "Great question!", that reply becomes the reference
+for the next, and the slide compounds.
+
+The fix is **positional, not motivational**. On every turn a short voice cue is
+appended to the last user message — *after* every prior assistant turn, in the
+position the model attends to most strongly — and is **never written to stored
+history**. Storing it would turn it into yet another assistant turn to imitate,
+which is the opposite of the point.
+
+The cue is built from `personality.md` itself, so the two can never disagree.
+
+Measured over an eight-turn conversation, the voice held: *"Four."* and
+*"Quiet enough. We get things done."*
+
+### Two-block system prompt
+
+| Block | Contents | Changes |
+|---|---|---|
+| Stable | Identity, personality, remembered facts | Rarely |
+| Dynamic | Current time | Every turn |
+
+Both are rebuilt each turn, which is what makes a hand edit to either file take
+effect immediately.
+
+## Tests
+
+```bash
+./run-tests          # 134 tests, ~4 seconds
+```
+
+The suite exists mainly to protect the things that break *silently*: the gate
+failing closed, memory not becoming a backdoor, the heartbeat holding what it
+notices. Verified to work — injecting a bug that made the default gate approve
+failed 5 tests immediately.
+
+| File | Protects |
+|---|---|
+| `test_gate.py` | Every way a tool could act without permission |
+| `test_memory.py` | Editable memory, and memory never widening permissions |
+| `test_heartbeat.py` | Quiet by default, catch-up, quiet hours, restarts, kill switch |
+| `test_untrusted.py` | Content read from outside stays data |
+| `test_brain.py` | One core: streaming, tool loops, failure recovery |
+| `test_personality.py` | Voice loading, the cue's position, and that it is never stored |
+| `test_config.py` | Config as source of truth; keys resolving per provider |
+| `test_keys.py` | Push-to-talk bindings, including the F9-not-space default |
+| `test_honesty.py` | Tools never claiming more than they do |
+
 ## Where to go next
 The harness is shaped to accept these without a rewrite:
 

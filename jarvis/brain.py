@@ -75,6 +75,7 @@ class Brain:
         memory_selector: MemorySelector | None = None,
         prompt_builder: Callable[[str], str] | None = None,
         on_usage: Callable[[dict], None] | None = None,
+        voice_cue: Callable[[], str] | None = None,
     ) -> None:
         self.provider = provider
         self.system_prompt = system_prompt
@@ -89,6 +90,10 @@ class Brain:
         # Usage from the most recent provider call, for the cost tally.
         self.last_usage: dict | None = None
         self.on_usage = on_usage
+        # The per-turn voice reminder. Appended to the last user message on its
+        # way to the model and never stored in history — see the comment in
+        # `_with_voice_cue`.
+        self.voice_cue = voice_cue
         self.history: list[Message] = []
 
     # -- public -------------------------------------------------------------
@@ -196,12 +201,56 @@ class Brain:
                 )
             self.history.append(Message(role="tool", outputs=outputs))
 
+    def _with_voice_cue(self, history: list[Message]) -> list[Message]:
+        """Append the voice reminder to the last user message, for the API only.
+
+        This is the anti-drift mechanism, and the *position* is the point.
+
+        As a conversation grows, the assistant's own prior replies become the
+        strongest behavioural signal and progressively outweigh the personality
+        block at the top of the system prompt. Once one reply slips into generic
+        assistant phrasing, that reply becomes the reference for the next, and
+        the slide compounds. A reminder at the top cannot win that contest; a
+        reminder sitting *after* every prior assistant turn can.
+
+        The cue is added to a copy that goes to the provider and is deliberately
+        never written back to `self.history`. Storing it would (a) bloat the
+        transcript, and (b) turn it into another prior assistant turn for the
+        model to imitate, which is the opposite of what it is for.
+        """
+        if self.voice_cue is None or not history:
+            return history
+
+        try:
+            cue = self.voice_cue()
+        except Exception:  # noqa: BLE001 - a broken cue must not stop a reply
+            return history
+        if not cue:
+            return history
+
+        # Find the last user message. Tool rounds end with a tool message, so
+        # walking back is necessary; the cue belongs with the human's turn.
+        for index in range(len(history) - 1, -1, -1):
+            message = history[index]
+            if message.role == "user" and message.content and not message.outputs:
+                patched = list(history)
+                patched[index] = Message(
+                    role=message.role,
+                    content=f"{message.content}\n\n{cue}",
+                    calls=message.calls,
+                    outputs=message.outputs,
+                    raw=message.raw,
+                )
+                return patched
+        return history
+
     def _one_turn(
         self, system: str, tools: list[dict] | None, spoken: list[str]
     ) -> Iterator[BrainEvent]:
         """Stream one model turn and return its `TurnEnd`."""
         end: TurnEnd | None = None
-        for event in self.provider.stream(system, self.history, tools):
+        outbound = self._with_voice_cue(self.history)
+        for event in self.provider.stream(system, outbound, tools):
             if isinstance(event, TextDelta):
                 spoken.append(event.text)
                 yield Chunk(event.text)

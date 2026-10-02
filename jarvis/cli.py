@@ -18,6 +18,7 @@ from .config import ConfigError, load_config, load_dotenv
 from .cost import CostTracker
 from .gate import CliGate, DenyAllGate, NoHumanGate
 from .memory import MemoryStore
+from .personality import load_personality
 from .paths import (
     AUDIT_FILE,
     COST_FILE,
@@ -51,12 +52,19 @@ def _build_brain(gate=None) -> tuple:
     # action regardless of where the turn came from.
     registry.gate = gate if gate is not None else DenyAllGate()
 
+    personality = load_personality()
+
     brain = Brain(
         provider,
-        build_system_prompt(cfg.assistant),
+        build_system_prompt(cfg.assistant, personality=personality),
         registry,
         memory_selector=lambda turn: store.render(store.relevant(turn)),
-        prompt_builder=lambda facts: build_system_prompt(cfg.assistant, facts),
+        prompt_builder=lambda facts: build_system_prompt(
+            cfg.assistant, facts, personality=personality
+        ),
+        # Re-read every turn, so editing personality.md takes effect on the very
+        # next reply without a restart.
+        voice_cue=lambda: load_personality().voice_cue(),
     )
     return cfg, brain, store
 
@@ -226,6 +234,11 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--personality",
+        action="store_true",
+        help="show the personality file and the per-turn voice cue",
+    )
+    parser.add_argument(
         "--desktop",
         action="store_true",
         help="open the desktop panel (a window, not a terminal)",
@@ -371,6 +384,21 @@ def main(argv: list[str] | None = None) -> int:
             "\nThis file is plain text: open it and edit a line to correct or "
             "delete a fact.\nJARVIS reads it at the start of every conversation."
         )
+        return 0
+
+    if args.personality:
+        from .personality import PERSONALITY_FILE, load_personality
+
+        p = load_personality()
+        print(f"Personality: {PERSONALITY_FILE}")
+        print(f"  loaded:      {p.present}")
+        print(f"  size:        {len(p.text):,} chars")
+        print(f"  examples:    {len(p.sound_like)} sound-like, {len(p.never_like)} never-like")
+        print(f"  re-read:     every turn (edit the file and it takes effect immediately)")
+        print("\n--- the per-turn voice cue (appended after your message) ---")
+        print(p.voice_cue() or "(none — no personality file found)")
+        print("\n--- the file ---")
+        print(p.render() or "(missing)")
         return 0
 
     if args.desktop:

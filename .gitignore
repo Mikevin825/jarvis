@@ -12,3 +12,7 @@ state/
 
 # Voice test fixtures
 # (small wavs used to exercise the voice path without a microphone)
+pytest
+.pytest_cache/
+__pycache__/
+*.pyc

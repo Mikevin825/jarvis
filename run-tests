@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Run the test suite. Use this before committing anything that touches the
+# safety posture, memory, or the heartbeat.
+exec "$(dirname "$0")/.venv/bin/python" -m pytest "$@"
