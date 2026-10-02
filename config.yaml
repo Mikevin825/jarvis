@@ -73,12 +73,13 @@ stt:
 # The mouth — text to speech.
 # ---------------------------------------------------------------------------
 tts:
-  # "edge"  — free Microsoft neural voices. No key, no account, needs network.
-  #           The best quality-per-effort option; recommended.
+  # "espeak" — local, instant, no key, no network. Robotic but dependable.
+  # "edge"  — free Microsoft neural voices. No key, needs network. Much more
+  #           natural than espeak; switch here to try it.
   # "piper" — fully offline neural voices. No key, no network, very fast.
-  # "espeak" — local and instant, but robotic.
-  # "elevenlabs" — the reference build's choice: most natural, needs a key.
-  provider: edge
+  # "elevenlabs" — the most natural of all; needs ELEVENLABS_API_KEY in .env.
+  #           Check which voices your key can use with: jarvis --voices
+  provider: espeak
 
   edge:
     # Browse voices: .venv/bin/python -m edge_tts --list-voices

@@ -118,6 +118,11 @@ def main(argv: list[str] | None = None) -> int:
             "speak (tests the whole voice path without a microphone)"
         ),
     )
+    parser.add_argument(
+        "--voices",
+        action="store_true",
+        help="list the ElevenLabs voices your key can use, then exit",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -130,6 +135,32 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     name = cfg.assistant.name
+
+    # -- list the voices an ElevenLabs key can actually use ------------------
+    if args.voices:
+        from .voice import SpeechError
+        from .voice.tts import ElevenLabsSpeaker
+
+        if not cfg.tts.api_key:
+            print(
+                "No ELEVENLABS_API_KEY found in .env, so there are no voices to "
+                "list. Add your key and try again.",
+                file=sys.stderr,
+            )
+            return 2
+        speaker = ElevenLabsSpeaker(cfg.tts.api_key, voice_id=cfg.tts.voice)
+        try:
+            voices = speaker.list_voices()
+        except SpeechError as exc:
+            print(f"cannot list voices: {exc}", file=sys.stderr)
+            return 2
+        print(f"{len(voices)} voice(s) available to this key:\n")
+        for voice_id, voice_name in voices:
+            print(f"  {voice_id}  {voice_name}")
+        print(
+            "\nPut the id you want in config.yaml under tts.elevenlabs.voice."
+        )
+        return 0
 
     # -- voice output only: speak and exit (isolates the mouth) --------------
     if args.say is not None:

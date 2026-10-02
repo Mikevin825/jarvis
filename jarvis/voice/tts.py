@@ -267,14 +267,14 @@ class ElevenLabsSpeaker(_SubprocessSpeaker):
     """Cloud speech via ElevenLabs. Streams, so playback starts before the
     sentence is fully synthesised."""
 
-    BASE = "https://api.elevenlabs.io/v1/text-to-speech"
+    BASE = "https://api.elevenlabs.io/v1"
 
     def __init__(
         self,
         api_key: str,
         *,
         voice_id: str,
-        model: str = "eleven_turbo_v2_5",
+        model: str = "eleven_flash_v2_5",
         timeout_seconds: float = 60.0,
     ) -> None:
         super().__init__()
@@ -282,6 +282,38 @@ class ElevenLabsSpeaker(_SubprocessSpeaker):
         self.voice_id = voice_id
         self.model = model
         self.timeout = httpx.Timeout(timeout_seconds, connect=10.0)
+
+    def list_voices(self) -> list[tuple[str, str]]:
+        """The voices this key can actually use, as (voice_id, name).
+
+        Worth checking before choosing a voice: on a free plan the public voice
+        library is not available through the API, so a voice id copied from the
+        website may be rejected even though it looks valid.
+        """
+        try:
+            response = httpx.get(
+                f"{self.BASE}/voices",
+                headers={"xi-api-key": self._api_key},
+                timeout=self.timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise SpeechError(f"Could not reach ElevenLabs: {exc}") from exc
+
+        if response.status_code in (401, 403):
+            raise SpeechError(
+                "ElevenLabs rejected the key. Check ELEVENLABS_API_KEY in .env."
+            )
+        if response.status_code != 200:
+            raise SpeechError(
+                f"ElevenLabs returned {response.status_code}: {response.text[:200]}"
+            )
+        try:
+            return [
+                (v["voice_id"], v.get("name", v["voice_id"]))
+                for v in response.json().get("voices", [])
+            ]
+        except (KeyError, ValueError) as exc:
+            raise SpeechError("ElevenLabs returned a voice list I could not read.") from exc
 
     def speak(self, text: str) -> None:
         text = text.strip()
@@ -294,7 +326,7 @@ class ElevenLabsSpeaker(_SubprocessSpeaker):
         try:
             with httpx.stream(
                 "POST",
-                f"{self.BASE}/{self.voice_id}",
+                f"{self.BASE}/text-to-speech/{self.voice_id}",
                 params={"output_format": "mp3_44100_128"},
                 headers={
                     "xi-api-key": self._api_key,
@@ -313,6 +345,19 @@ class ElevenLabsSpeaker(_SubprocessSpeaker):
                 if response.status_code in (401, 403):
                     raise SpeechError(
                         "ElevenLabs rejected the key. Check ELEVENLABS_API_KEY in .env."
+                    )
+                if response.status_code == 422:
+                    raise SpeechError(
+                        f"ElevenLabs rejected the request for voice "
+                        f"'{self.voice_id}'. On a free plan the public voice "
+                        "library is not available through the API — use a voice "
+                        "from your own account instead. List them with:\n"
+                        "  .venv/bin/python -m jarvis --voices"
+                    )
+                if response.status_code == 429:
+                    raise SpeechError(
+                        "ElevenLabs rate limit or character quota reached. "
+                        "Check your plan's usage."
                     )
                 if response.status_code != 200:
                     raise SpeechError(
