@@ -41,6 +41,7 @@ bugs below findable.
 |---|---|---|
 | 1 | The orb — wireframe icosahedron, noise displacement, fresnel, glow shell, rings | ✅ done |
 | 2 | The sky — nebula, stars, bloom | ✅ done |
+| 2 | The sky — nebula, stars, bloom | ✅ done |
 | 3 | The star network — clusters, connections, dust | ⬜ |
 | 4 | States and voice — real audio taps | ⬜ (table and synthetic path done) |
 | 5 | Themes, performance, accessibility | ⬜ (perf + reduced motion done) |
