@@ -193,15 +193,28 @@ _REGISTRY = {
     ClockCheck.name: ClockCheck,
     NoteCountCheck.name: NoteCountCheck,
     MessageWatchCheck.name: MessageWatchCheck,
+    "scout": None,  # Registered separately — needs a provider
 }
 
 
-def build_checks(config: dict) -> list[Check]:
-    """Construct the enabled checks from the `heartbeat.checks` config block."""
+def build_checks(config: dict, provider=None) -> list[Check]:
+    """Construct the enabled checks from the `heartbeat.checks` config block.
+
+    The scout check needs a provider, so it is handled separately. If no
+    provider is given, the scout check is skipped.
+    """
     built: list[Check] = []
     for name, settings in (config or {}).items():
         settings = settings or {}
         if not settings.get("enabled", True):
+            continue
+        if name == "scout":
+            # The scout check needs a provider — skip if none given.
+            if provider is None:
+                continue
+            from .scout_check import ScoutCheck
+            interval = float(settings.get("interval_seconds", 3600))
+            built.append(ScoutCheck(interval, settings, provider))
             continue
         factory = _REGISTRY.get(name)
         if factory is None:

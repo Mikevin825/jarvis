@@ -86,8 +86,10 @@ class Heartbeat:
             bool(self.config.get("quiet_hours_enabled", True)),
         )
         self.poll_seconds = float(self.config.get("poll_seconds", 5))
+        self._provider = None  # Set by the CLI when a provider is available
         self.checks = checks if checks is not None else build_checks(
-            self.config.get("checks", {})
+            self.config.get("checks", {}),
+            provider=getattr(self, "_provider", None),
         )
         self.log = log
         self._stop = threading.Event()
@@ -103,6 +105,19 @@ class Heartbeat:
             self.schedule.ensure(check.name, check.interval_seconds, first_delay=first_delay)
 
     # -- lifecycle ----------------------------------------------------------
+
+    def set_provider(self, provider) -> None:
+        """Set the provider for checks that need one (e.g. the scout).
+
+        Called by the CLI when a provider is available. Checks that need a
+        provider are rebuilt with it.
+        """
+        self._provider = provider
+        # Rebuild checks that need a provider.
+        self.checks = build_checks(
+            self.config.get("checks", {}),
+            provider=provider,
+        )
 
     @property
     def paused(self) -> bool:
