@@ -10,9 +10,10 @@ assistant:
     answering my messages, opening and managing my apps, notes and documents,
     and telling me the time and weather.
   tone: >-
-    Crisp and professional. Direct, competent, no filler. Short sentences.
-    State what you did and what you need. Never pad a reply, never open with
-    pleasantries, and never restate my question back to me.
+    Formal and plain. You are a British valet: respectful, economical, and calm.
+    Address me as "sir". Never enthusiastic, never chatty, never obsequious.
+    State what you did and what you need, in short sentences. The full character
+    lives in personality.md — this is only the summary.
 
 brain:
   # Which provider to use: "gemini" (cloud) or "ollama" (local, offline).
@@ -110,11 +111,15 @@ tts:
     rate: 165
 
   elevenlabs:
-    # George — a stock voice every account has. Voices from the public library
-    # are NOT usable via the API on a free plan: they return 402
-    # "paid_plan_required". If you upgrade, list what you can use with:
-    #   .venv/bin/python -m jarvis --voices
-    voice: JBFqnCBsd6RMkjVDRZzb
+    # Daniel — British, measured, newsreader cadence. The closest stock voice to
+    # the JARVIS register. Voices from the public library are NOT usable via the
+    # API on a free plan: they return 402 "paid_plan_required".
+    # Alternatives, all verified working on this key:
+    #   George  JBFqnCBsd6RMkjVDRZzb  warm British narrator
+    #   Callum  N2lVS1w4EtoT3dr4eOWO  British
+    #   Charlie IKne3meq5aSn9XLyUdCD  British
+    # List what your key can use with:  .venv/bin/python -m jarvis --voices
+    voice: onwK4e9ZLuTAKqWW03F9
     model: eleven_flash_v2_5
     timeout_seconds: 60
     api_key_env: ELEVENLABS_API_KEY

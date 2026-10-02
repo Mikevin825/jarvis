@@ -514,6 +514,11 @@ Verified end to end: model → gate → window → click *Allow* → the action 
 The voice lives in **`personality.md`** — plain prose, re-read on every turn. Edit
 it, save it, and the very next reply uses it. No restart.
 
+**The character is JARVIS from the MCU**: a British valet. Formal, economical,
+calm. Addresses you as "sir". Dry rather than cold, never enthusiastic, never
+obsequious. The file spells out the manner, the register, and the failure modes
+to avoid — servility being the main one.
+
 ```bash
 jarvis --personality     # show the file and the per-turn cue
 ```
