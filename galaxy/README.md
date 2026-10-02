@@ -58,3 +58,9 @@ capturing a real render at every layer rather than trusting that it looks right.
    units from a radius-1 sphere the view direction is nearly constant across the
    surface, so the fresnel was ~0 everywhere and the glow rendered as a filled
    disc. The normal is now carried to the fragment stage in view space.
+
+## A footgun worth naming
+
+`pkill -f "http.server 8791"` kills **itself** when the pattern appears in the
+invoking shell's own command line — `pkill -f` matches the full command line of
+every process, including the one running it. Kill by PID instead.
