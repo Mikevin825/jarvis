@@ -184,12 +184,21 @@ turn uses. Nothing in `jarvis/voice/` re-implements the agent.
 
 | Piece | Providers | Notes |
 |---|---|---|
-| Ears (`stt`) | `whisper` (local, default), `deepgram` (cloud) | Whisper needs no key and runs offline. |
-| Mouth (`tts`) | `espeak` (local, default), `elevenlabs` (cloud) | espeak is robotic but instant and free. |
+| Ears (`stt`) | **`deepgram`** (cloud, default), `whisper` (local fallback) | Deepgram is ~1.6s; whisper is ~4.4s warm, ~9s cold. |
+| Mouth (`tts`) | `elevenlabs` (cloud, default), `espeak` / `piper` / `edge` (local) | ElevenLabs sounds best; the local options are free. |
 
-**Both default to local**, so the entire voice loop works today with no signups
-and no cost. Deepgram and ElevenLabs are wired and ready — add the key to `.env`
-and change one line in `config.yaml` to switch either one.
+**Measured latency** on this machine, same 80 KB utterance:
+
+| Stage | Provider | Warm | Notes |
+|---|---|---|---|
+| Ears | `deepgram` nova-3 | **1.6s** | No local model to load; first call 2.1s incl. TLS |
+| Ears | `whisper` base.en | 4.4s | 9.0s on first call while the model loads into RAM |
+| Brain | gemini-3.5-flash-lite | 1.5s | Not the bottleneck |
+| Mouth | ElevenLabs | ~4.9s | Per sentence |
+
+Whisper is the offline fallback and stays working: set `stt.provider: whisper`
+and it runs with no key and no network. Every Deepgram failure message points
+at it.
 
 ### How a spoken turn flows
 

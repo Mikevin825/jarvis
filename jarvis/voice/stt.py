@@ -28,7 +28,16 @@ class Transcriber(Protocol):
 
 
 class DeepgramTranscriber:
-    """Cloud transcription via Deepgram's pre-recorded endpoint."""
+    """Cloud transcription via Deepgram's pre-recorded endpoint.
+
+    Chosen over local whisper for one reason: latency. Whisper on CPU takes
+    roughly ten seconds per utterance, which makes a spoken conversation feel
+    like a walkie-talkie. Deepgram returns in about a second.
+
+    Wire format is a single POST to /v1/listen with the audio as the body and
+    the options as query parameters. Everything the user says in one push-to-talk
+    turn is one pre-recorded request — streaming would only help for an open mic.
+    """
 
     ENDPOINT = "https://api.deepgram.com/v1/listen"
 
@@ -36,7 +45,7 @@ class DeepgramTranscriber:
         self,
         api_key: str,
         *,
-        model: str = "nova-2",
+        model: str = "nova-3",
         language: str = "en",
         timeout_seconds: float = 60.0,
     ) -> None:
@@ -44,6 +53,7 @@ class DeepgramTranscriber:
         self.model = model
         self.language = language
         self.timeout = httpx.Timeout(timeout_seconds, connect=10.0)
+        self.last_duration: float | None = None
 
     def transcribe(self, audio_path: Path) -> str:
         if not audio_path.exists():
@@ -56,6 +66,7 @@ class DeepgramTranscriber:
                     "model": self.model,
                     "language": self.language,
                     "smart_format": "true",
+                    "punctuate": "true",
                 },
                 headers={
                     "Authorization": f"Token {self._api_key}",
@@ -65,25 +76,51 @@ class DeepgramTranscriber:
                 timeout=self.timeout,
             )
         except httpx.TimeoutException as exc:
-            raise TranscriptionError("Deepgram did not respond in time.") from exc
+            raise TranscriptionError(
+                "Deepgram did not respond in time. "
+                "Set stt.provider: whisper in config.yaml to transcribe locally."
+            ) from exc
         except httpx.HTTPError as exc:
-            raise TranscriptionError(f"Could not reach Deepgram: {exc}") from exc
+            raise TranscriptionError(
+                f"Could not reach Deepgram: {exc}. "
+                "Set stt.provider: whisper in config.yaml to work offline."
+            ) from exc
 
         if response.status_code in (401, 403):
             raise TranscriptionError(
-                "Deepgram rejected the key. Check DEEPGRAM_API_KEY in .env."
+                "Deepgram rejected the key. Check DEEPGRAM_API_KEY in .env "
+                "(it must be the API key, not the project id)."
+            )
+        if response.status_code == 402:
+            raise TranscriptionError(
+                "Deepgram says the account has no credit left. "
+                "Check usage in the Deepgram console, or set "
+                "stt.provider: whisper in config.yaml to transcribe locally."
+            )
+        if response.status_code == 429:
+            raise TranscriptionError(
+                "Deepgram rate limit reached. Wait a moment, or set "
+                "stt.provider: whisper in config.yaml."
+            )
+        if response.status_code == 400:
+            raise TranscriptionError(
+                f"Deepgram rejected the request ({response.text[:200]}). "
+                f"The model '{self.model}' may not exist on this account — "
+                "try 'nova-2' in config.yaml under stt.deepgram.model."
             )
         if response.status_code != 200:
             raise TranscriptionError(
-                f"Deepgram returned {response.status_code}: "
-                f"{response.text[:200]}"
+                f"Deepgram returned {response.status_code}: {response.text[:200]}"
             )
 
         try:
             data = response.json()
-            return (
+            transcript = (
                 data["results"]["channels"][0]["alternatives"][0]["transcript"]
             ).strip()
+            # Duration of the audio, so latency can be reported against it.
+            self.last_duration = (data.get("metadata") or {}).get("duration")
+            return transcript
         except (KeyError, IndexError, ValueError) as exc:
             raise TranscriptionError(
                 "Deepgram returned a response I could not read."

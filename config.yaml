@@ -54,10 +54,11 @@ brain:
 # The ears — speech to text.
 # ---------------------------------------------------------------------------
 stt:
-  # "whisper" runs entirely on this machine: no key, no network, no cost.
-  # "deepgram" is the cloud option from the reference build: faster and more
-  # accurate, but needs DEEPGRAM_API_KEY in .env.
-  provider: whisper
+  # "deepgram" — cloud, ~1s per utterance. Needs DEEPGRAM_API_KEY in .env.
+  # "whisper"  — entirely local, no key, no network, but ~10s per utterance on
+  #              CPU. Keep this as the offline fallback: if Deepgram is down or
+  #              you have no connection, switch back here and it just works.
+  provider: deepgram
 
   whisper:
     # tiny.en / base.en / small.en — bigger is more accurate and slower.
@@ -66,7 +67,9 @@ stt:
     compute_type: int8
 
   deepgram:
-    model: nova-2
+    # nova-3 is the current flagship: lower latency, better on noisy audio.
+    # Fall back to nova-2 if your account does not have nova-3.
+    model: nova-3
     language: en
     timeout_seconds: 60
     api_key_env: DEEPGRAM_API_KEY
