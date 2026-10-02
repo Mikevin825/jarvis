@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 STATE_DIR = ROOT / "state"
 NOTES_DIR = STATE_DIR / "notes"
 MESSAGES_FILE = STATE_DIR / "messages.json"
+MEMORY_FILE = STATE_DIR / "memory.txt"
 
 
 def ensure_dirs() -> None:

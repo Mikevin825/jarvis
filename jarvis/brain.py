@@ -17,7 +17,7 @@ store that survives a restart.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterator, Sequence
+from typing import Callable, Iterator, Sequence
 
 from .providers import (
     FunctionCall,
@@ -31,6 +31,10 @@ from .providers import (
 from .tools import ToolRegistry
 
 DEFAULT_MAX_TOOL_ROUNDS = 8
+
+# Given the turn's text, return the facts worth showing the model. Returning ""
+# means "nothing remembered", which keeps the prompt free of an empty section.
+MemorySelector = Callable[[str], str]
 
 
 @dataclass
@@ -64,14 +68,34 @@ class Brain:
         system_prompt: str,
         registry: ToolRegistry | None = None,
         max_tool_rounds: int = DEFAULT_MAX_TOOL_ROUNDS,
+        memory_selector: MemorySelector | None = None,
+        prompt_builder: Callable[[str], str] | None = None,
     ) -> None:
         self.provider = provider
         self.system_prompt = system_prompt
         self.registry = registry
         self.max_tool_rounds = max_tool_rounds
+        # Long-term memory, refreshed at the start of every turn. Recomputing it
+        # per turn is what lets JARVIS use a fact it learned moments ago, and it
+        # also means a hand edit to the memory file is picked up without a
+        # restart. Both are worth the trivial cost.
+        self.memory_selector = memory_selector
+        self.prompt_builder = prompt_builder
         self.history: list[Message] = []
 
     # -- public -------------------------------------------------------------
+
+    def current_system_prompt(self, turn_text: str = "") -> str:
+        """The system prompt for this turn, including relevant memory."""
+        if self.prompt_builder is None:
+            return self.system_prompt
+        if self.memory_selector is None:
+            return self.prompt_builder("")
+        try:
+            facts = self.memory_selector(turn_text)
+        except Exception:  # noqa: BLE001 - memory must never break a conversation
+            facts = ""
+        return self.prompt_builder(facts)
 
     def ask(self, user_text: str) -> Iterator[BrainEvent]:
         """Run one turn, yielding the reply and any tool activity as it happens.
@@ -113,9 +137,10 @@ class Brain:
 
     def _run(self, user_text: str, spoken: list[str]) -> Iterator[BrainEvent]:
         tools = self.registry.declarations() if self.registry else None
+        system = self.current_system_prompt(user_text)
 
         for round_index in range(self.max_tool_rounds + 1):
-            end = yield from self._one_turn(tools, spoken)
+            end = yield from self._one_turn(system, tools, spoken)
 
             self.history.append(
                 Message(
@@ -155,11 +180,11 @@ class Brain:
             self.history.append(Message(role="tool", outputs=outputs))
 
     def _one_turn(
-        self, tools: list[dict] | None, spoken: list[str]
+        self, system: str, tools: list[dict] | None, spoken: list[str]
     ) -> Iterator[BrainEvent]:
         """Stream one model turn and return its `TurnEnd`."""
         end: TurnEnd | None = None
-        for event in self.provider.stream(self.system_prompt, self.history, tools):
+        for event in self.provider.stream(system, self.history, tools):
             if isinstance(event, TextDelta):
                 spoken.append(event.text)
                 yield Chunk(event.text)

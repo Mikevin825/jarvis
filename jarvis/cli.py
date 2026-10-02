@@ -15,6 +15,8 @@ import sys
 
 from .brain import Brain, Chunk, ToolRun
 from .config import ConfigError, load_config, load_dotenv
+from .memory import MemoryStore
+from .paths import MEMORY_FILE
 from .prompts import build_system_prompt
 from .providers import ProviderError, build_provider
 from .tools import build_registry
@@ -25,9 +27,24 @@ EXIT_WORDS = {"/quit", "/exit", "/q"}
 def _build_brain() -> tuple:
     load_dotenv()
     cfg = load_config()
+
+    store = MemoryStore(MEMORY_FILE)
+    store.load()
+
     provider = build_provider(cfg.brain)
-    registry = build_registry()
-    return cfg, Brain(provider, build_system_prompt(cfg.assistant), registry)
+    registry = build_registry(store)
+
+    # Memory is injected fresh each turn rather than captured once, so a fact
+    # learned this turn is usable in the next, and a hand edit to the file is
+    # picked up without restarting.
+    brain = Brain(
+        provider,
+        build_system_prompt(cfg.assistant),
+        registry,
+        memory_selector=lambda turn: store.render(store.relevant(turn)),
+        prompt_builder=lambda facts: build_system_prompt(cfg.assistant, facts),
+    )
+    return cfg, brain, store
 
 
 def _fmt_args(args: dict) -> str:
@@ -123,10 +140,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="list the ElevenLabs voices your key can use, then exit",
     )
+    parser.add_argument(
+        "--memory",
+        action="store_true",
+        help="show everything JARVIS remembers, and where it is stored",
+    )
     args = parser.parse_args(argv)
 
     try:
-        cfg, brain = _build_brain()
+        cfg, brain, store = _build_brain()
     except ConfigError as exc:
         print(f"configuration problem: {exc}", file=sys.stderr)
         return 2
@@ -135,6 +157,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     name = cfg.assistant.name
+
+    # -- show long-term memory ------------------------------------------------
+    if args.memory:
+        facts = store.facts()
+        print(f"Long-term memory — {len(facts)} fact(s)")
+        print(f"stored at: {store.path}\n")
+        if not facts:
+            print("  (nothing remembered yet)")
+        else:
+            for fact in facts:
+                print(f"  {fact.id} | {fact.text}")
+        print(
+            "\nThis file is plain text: open it and edit a line to correct or "
+            "delete a fact.\nJARVIS reads it at the start of every conversation."
+        )
+        return 0
 
     # -- list the voices an ElevenLabs key can actually use ------------------
     if args.voices:
