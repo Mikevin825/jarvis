@@ -25,15 +25,18 @@ brain:
   timeout_seconds: 60
 
   gemini:
-    # Gemini 3 Pro was requested, but on a free-tier key the Pro preview model
-    # has NO quota — every call returns 429 RESOURCE_EXHAUSTED, and its earlier
-    # endpoint (gemini-3-pro-preview) has been shut down by Google. Verified on
-    # this key: gemini-3.6-flash and gemini-3.5-flash respond; the 3.8/3.7
-    # Flash models are currently 503 (high demand).
+    # Gemini 3 Pro was requested, but the Pro preview model has NO quota on a
+    # free-tier key — every call returns 429 RESOURCE_EXHAUSTED — and its
+    # earlier endpoint (gemini-3-pro-preview) has been shut down by Google.
+    #
+    # Verified against this key: gemini-3.5-flash, gemini-3.5-flash-lite and
+    # gemini-3.6-flash all answer. The free tier also has a *daily* request cap
+    # shared across models, so a busy day can exhaust it — if that happens,
+    # switch to another model here or wait for the reset at midnight Pacific.
     #
     # Swap this one line when Pro quota is available on your plan — the model
     # name lives here precisely so that is a one-line change.
-    model: gemini-3.6-flash
+    model: gemini-3.5-flash
     api_key_env: GEMINI_API_KEY
     base_url: https://generativelanguage.googleapis.com/v1beta
 

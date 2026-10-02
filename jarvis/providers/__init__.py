@@ -3,14 +3,25 @@
 from __future__ import annotations
 
 from ..config import BrainConfig
-from .base import Message, Provider, ProviderError, StreamEvent, TextDelta, TurnEnd
+from .base import (
+    FunctionCall,
+    Message,
+    Provider,
+    ProviderError,
+    StreamEvent,
+    TextDelta,
+    ToolOutput,
+    TurnEnd,
+)
 
 __all__ = [
+    "FunctionCall",
     "Message",
     "Provider",
     "ProviderError",
     "StreamEvent",
     "TextDelta",
+    "ToolOutput",
     "TurnEnd",
     "build_provider",
 ]

@@ -37,7 +37,7 @@ These are the first tools and the first test cases. Everything else comes later.
 | Language | **Python 3.14** | Boring, well-supported, good audio + HTTP libraries. |
 | Runtime | Local venv at `jarvis/.venv` | Self-contained; no global installs. |
 | Framework | **None** | Small, readable harness. Stdlib + `httpx` + `pyyaml` only. |
-| Brain provider | **Gemini** (`gemini-3.6-flash`) via the REST API | Chosen by user (Gemini 3 Pro). Behind a thin provider seam so it can be swapped. |
+| Brain provider | **Gemini** (`gemini-3.5-flash`) via the REST API | Chosen by user (Gemini 3 Pro). Behind a thin provider seam so it can be swapped. |
 | Model name | In `config.yaml` | Not hardcoded — one-line change to swap models. |
 | STT | Deepgram (Tier 3) | Fast, accurate, streams. Behind its own seam. |
 | TTS | ElevenLabs (Tier 3) | Natural voice, streams. Behind its own seam. |
@@ -50,11 +50,12 @@ These are the first tools and the first test cases. Everything else comes later.
 >    **zero quota on a free-tier plan** — every call returns
 >    `429 RESOURCE_EXHAUSTED`. The key itself is fine.
 >
-> Verified working on this key: **`gemini-3.6-flash`** and `gemini-3.5-flash`.
-> `gemini-3.8-flash` / `3.7-flash` were returning `503` (provider overload) at
-> the time of writing. So the default is `gemini-3.6-flash` — same Gemini 3
-> family, and it actually answers. Because the model lives in `config.yaml`,
-> moving to a Pro model is a **one-line change** once Pro quota is available.
+> Verified working on this key: **`gemini-3.5-flash`**, `gemini-3.5-flash-lite`
+> and `gemini-3.6-flash`. The free tier also enforces a **daily** request cap
+> shared across models — a heavy day can exhaust it, in which case switch model
+> in `config.yaml` or wait for the reset at midnight Pacific. Default is
+> `gemini-3.5-flash`. Moving to a Pro model is a **one-line change** once Pro
+> quota is available.
 
 ## Where it runs
 
@@ -119,9 +120,9 @@ never delivered once and lost. Quiet hours are respected for non-urgent items.
 | Tier | What | Status |
 |---|---|---|
 | 0 | Interview + this spec | ✅ done |
-| 1 | The brain — text conversation loop | ⬜ next |
-| 2 | The hands — tool registry | ⬜ |
-| 3 | The ears and mouth — push-to-talk voice | ⬜ |
+| 1 | The brain — text conversation loop | ✅ done |
+| 2 | The hands — tool registry | ✅ done |
+| 3 | The ears and mouth — push-to-talk voice | ⬜ next |
 | 4 | The memory — durable facts across restarts | ⬜ |
 | 5 | The heartbeat — proactive checks | ⬜ |
 | 6 | The rails — confirmation gate, config, audit, kill switch | ⬜ |
@@ -132,3 +133,35 @@ Run it, hold a short back-and-forth, and it clearly remembers earlier turns in
 the same session. Kill it and restart → it has forgotten everything (expected;
 memory is Tier 4). If a reply ever appears with no memory of the previous turn,
 the history list is not being passed back in.
+
+## Tier 2 verification (what "done" means)
+
+Ask for something that needs a tool and watch the assistant call it, get a
+result, and weave it into a natural reply. Then make the tool fail on purpose
+and confirm the assistant explains the problem instead of crashing.
+
+## The tool registry
+
+15 tools across the first three capabilities. Adding a capability is one
+self-contained module plus one line in `jarvis/tools/__init__.py` — the core
+loop never changes.
+
+| Module | Tools | Notes |
+|---|---|---|
+| `clock` | `get_current_time` | Safe, no network. |
+| `weather` | `get_weather` | Open-Meteo, no key needed. |
+| `notes` | `list_notes`, `read_note`, `create_note`, `append_note`, `delete_note` | Plain markdown in `state/notes/`. `delete_note` is consequential. |
+| `apps` | `open_app`, `open_path`, `open_url` | Launches via argv lists, never a shell. |
+| `messages` | `list_messages`, `read_message`, `draft_message`, `list_drafts`, `send_message` | Local store in `state/messages.json`. `send_message` is consequential. |
+
+**Messaging is honest about its scope:** it is backed by a local store, not a
+live mail or SMS account. The capability is real and testable now; wiring it to
+a real provider is a credentials task later, and the tool shape will not change.
+
+### Rules the registry enforces
+
+- A tool failure returns a plain-language error **to the model**, which then
+  decides how to explain it. The loop never crashes on a bad tool call.
+- Tool descriptions are written for a reader, and inputs are typed and validated.
+- Consequential tools (send, spend, delete, change settings) are flagged and
+  **fail closed** until Tier 6 builds the real confirmation gate.

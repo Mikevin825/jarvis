@@ -2,6 +2,9 @@
 
 Needs no API key. Useful for developing and verifying the harness without a
 cloud account, and as a fallback when the network is down.
+
+Note: small local models are much less reliable at choosing tools than the cloud
+brain, so this is a development path rather than the daily driver.
 """
 
 from __future__ import annotations
@@ -11,10 +14,19 @@ from typing import Iterator, Sequence
 
 import httpx
 
-from .base import Message, ProviderError, StreamEvent, TextDelta, TurnEnd
+from .base import (
+    FunctionCall,
+    Message,
+    ProviderError,
+    StreamEvent,
+    TextDelta,
+    TurnEnd,
+)
 
 
 class OllamaProvider:
+    supports_tools = True
+
     def __init__(
         self,
         *,
@@ -29,25 +41,59 @@ class OllamaProvider:
         # Local models can be slow to load on first call; allow a long read.
         self.timeout = httpx.Timeout(timeout_seconds, connect=5.0)
 
-    def _payload(self, system: str, messages: Sequence[Message]) -> dict:
-        return {
+    def _messages(self, system: str, messages: Sequence[Message]) -> list[dict]:
+        out: list[dict] = [{"role": "system", "content": system}]
+        for m in messages:
+            if m.outputs:
+                for o in m.outputs:
+                    out.append({"role": "tool", "content": o.content})
+            elif m.calls:
+                out.append(
+                    {
+                        "role": "assistant",
+                        "content": m.content or "",
+                        "tool_calls": [
+                            {"function": {"name": c.name, "arguments": c.args}}
+                            for c in m.calls
+                        ],
+                    }
+                )
+            else:
+                out.append({"role": m.role, "content": m.content})
+        return out
+
+    def stream(
+        self,
+        system: str,
+        messages: Sequence[Message],
+        tools: list[dict] | None = None,
+    ) -> Iterator[StreamEvent]:
+        url = f"{self.base_url}/api/chat"
+        payload = {
             "model": self.model,
-            "messages": [
-                {"role": "system", "content": system},
-                *[{"role": m.role, "content": m.content} for m in messages],
-            ],
+            "messages": self._messages(system, messages),
             "stream": True,
             "options": {"temperature": self.temperature},
         }
+        if tools:
+            payload["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t["name"],
+                        "description": t["description"],
+                        "parameters": t["parameters"],
+                    },
+                }
+                for t in tools
+            ]
 
-    def stream(self, system: str, messages: Sequence[Message]) -> Iterator[StreamEvent]:
-        url = f"{self.base_url}/api/chat"
+        calls: list[FunctionCall] = []
+        text_parts: list[str] = []
+
         try:
             with httpx.stream(
-                "POST",
-                url,
-                json=self._payload(system, messages),
-                timeout=self.timeout,
+                "POST", url, json=payload, timeout=self.timeout
             ) as response:
                 if response.status_code != 200:
                     detail = response.read().decode("utf-8", "replace")[:300]
@@ -65,9 +111,23 @@ class OllamaProvider:
                         continue
                     if chunk.get("error"):
                         raise ProviderError(f"ollama: {chunk['error']}")
-                    text = (chunk.get("message") or {}).get("content")
+
+                    message = chunk.get("message") or {}
+                    text = message.get("content")
                     if text:
+                        text_parts.append(text)
                         yield TextDelta(text)
+
+                    for tc in message.get("tool_calls") or []:
+                        fn = tc.get("function") or {}
+                        args = fn.get("arguments") or {}
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except json.JSONDecodeError:
+                                args = {}
+                        calls.append(FunctionCall(name=fn.get("name", ""), args=args))
+
                     if chunk.get("done"):
                         break
 
@@ -83,4 +143,4 @@ class OllamaProvider:
         except httpx.HTTPError as exc:
             raise ProviderError(f"could not reach the local model: {exc}") from exc
 
-        yield TurnEnd(usage=None)
+        yield TurnEnd(usage=None, text="".join(text_parts), calls=calls, raw=None)
