@@ -1,0 +1,11 @@
+# Secrets — never commit
+.env
+
+# Local runtime
+.venv/
+__pycache__/
+*.py[cod]
+
+# Tier 4+ durable state (memory, schedule, notices, audit log)
+state/
+*.log

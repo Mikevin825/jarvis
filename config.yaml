@@ -1,0 +1,39 @@
+# JARVIS configuration.
+#
+# Everything here is meant to be edited. Changing a threshold, a model name, or
+# a tone should be a one-line edit — never a code change. See AGENT.md.
+
+assistant:
+  name: JARVIS
+  purpose: >-
+    A voice-first personal assistant. You help me with three things first:
+    answering my messages, opening and managing my apps, notes and documents,
+    and telling me the time and weather.
+  tone: >-
+    Crisp and professional. Direct, competent, no filler. Short sentences.
+    State what you did and what you need. Never pad a reply, never open with
+    pleasantries, and never restate my question back to me.
+
+brain:
+  # Which provider to use: "gemini" (cloud) or "ollama" (local, offline).
+  provider: gemini
+
+  # Shared generation settings, applied to whichever provider is selected.
+  temperature: 0.7
+  max_output_tokens: 2048
+  # Seconds to wait on the model before giving up with a clear message.
+  timeout_seconds: 60
+
+  gemini:
+    # NOTE: "gemini-3-pro-preview" has been shut down by Google. The current
+    # Pro-family endpoint is gemini-3.1-pro-preview. Swap this one line when a
+    # newer ID ships.
+    model: gemini-3.1-pro-preview
+    api_key_env: GEMINI_API_KEY
+    base_url: https://generativelanguage.googleapis.com/v1beta
+
+  ollama:
+    # Local fallback — needs no API key. Handy for offline development and for
+    # verifying the harness when no cloud key is configured.
+    model: qwen2.5-coder:3b
+    base_url: http://localhost:11434
