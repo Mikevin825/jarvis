@@ -105,12 +105,24 @@ class VoiceConfig:
 
 
 @dataclass(frozen=True)
+class HeartbeatConfig:
+    enabled: bool
+    poll_seconds: float
+    quiet_hours_enabled: bool
+    quiet_hours_start: str
+    quiet_hours_end: str
+    catch_up_on_start: bool
+    checks: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class Config:
     assistant: AssistantConfig
     brain: BrainConfig
     stt: SttConfig
     tts: TtsConfig
     voice: VoiceConfig
+    heartbeat: HeartbeatConfig
     # Which providers have a usable key right now, by section.
     available_keys: dict = field(default_factory=dict)
 
@@ -132,6 +144,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     stt_raw = raw.get("stt") or {}
     tts_raw = raw.get("tts") or {}
     voice_raw = raw.get("voice") or {}
+    hb_raw = raw.get("heartbeat") or {}
 
     provider = _require(brain_raw, "provider", "brain")
     provider_block = (brain_raw.get(provider) or {})
@@ -228,4 +241,13 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
             min_sentence_chars=int(voice_raw.get("min_sentence_chars", 2)),
         ),
         available_keys=available_keys,
+        heartbeat=HeartbeatConfig(
+            enabled=bool(hb_raw.get("enabled", True)),
+            poll_seconds=float(hb_raw.get("poll_seconds", 5)),
+            quiet_hours_enabled=bool(hb_raw.get("quiet_hours_enabled", True)),
+            quiet_hours_start=str(hb_raw.get("quiet_hours_start", "22:00")),
+            quiet_hours_end=str(hb_raw.get("quiet_hours_end", "07:00")),
+            catch_up_on_start=bool(hb_raw.get("catch_up_on_start", True)),
+            checks=hb_raw.get("checks") or {},
+        ),
     )

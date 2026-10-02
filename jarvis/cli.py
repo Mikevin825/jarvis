@@ -145,6 +145,31 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="show everything JARVIS remembers, and where it is stored",
     )
+    parser.add_argument(
+        "--inbox",
+        action="store_true",
+        help="show notices the heartbeat has surfaced, then exit",
+    )
+    parser.add_argument(
+        "--dismiss",
+        action="store_true",
+        help="clear all notices from the inbox, then exit",
+    )
+    parser.add_argument(
+        "--pause",
+        action="store_true",
+        help="kill switch: stop all proactive behaviour (you can still talk)",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="release the kill switch and resume proactive behaviour",
+    )
+    parser.add_argument(
+        "--no-heartbeat",
+        action="store_true",
+        help="start without the background heartbeat",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -157,6 +182,54 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     name = cfg.assistant.name
+
+    # -- heartbeat: kill switch, inbox, catch-up -----------------------------
+    from .audit import AuditLog
+    from .heartbeat import Heartbeat, Inbox, Schedule
+    from .paths import AUDIT_FILE, INBOX_FILE, PAUSE_FILE, SCHEDULE_FILE
+
+    log = AuditLog(AUDIT_FILE)
+    hb_schedule = Schedule(SCHEDULE_FILE).load()
+    inbox = Inbox(INBOX_FILE).load()
+
+    if args.pause:
+        PAUSE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        PAUSE_FILE.write_text(
+            "Kill switch engaged. Delete this file or run --resume.\n",
+            encoding="utf-8",
+        )
+        hb_schedule.set_paused(True)
+        log.write(source="kill-switch", status="engaged", detail="all proactive behaviour stopped")
+        print("Kill switch ENGAGED — all proactive behaviour stopped.")
+        print("You can still talk to JARVIS normally. Resume with --resume.")
+        return 0
+
+    if args.resume:
+        PAUSE_FILE.unlink(missing_ok=True)
+        hb_schedule.set_paused(False)
+        log.write(source="kill-switch", status="released", detail="proactive behaviour resumed")
+        print("Kill switch released — proactive behaviour resumes.")
+        return 0
+
+    if args.inbox:
+        pending = inbox.pending()
+        if not pending:
+            print("The inbox is empty.")
+            return 0
+        print(f"{len(pending)} notice(s):\n")
+        for notice in pending:
+            flag = "!" if notice.urgent else "·"
+            print(f"  {flag} [{notice.id}] {notice.title}")
+            if notice.body:
+                for line in notice.body.splitlines():
+                    print(f"      {line}")
+        print("\nClear them with: jarvis --dismiss")
+        return 0
+
+    if args.dismiss:
+        count = inbox.dismiss_all()
+        print(f"Dismissed {count} notice(s).")
+        return 0
 
     # -- show long-term memory ------------------------------------------------
     if args.memory:
@@ -342,10 +415,55 @@ def main(argv: list[str] | None = None) -> int:
 
     # Interactive.
     print(f"{name} is awake. Provider: {cfg.brain.provider} ({cfg.brain.model}).")
-    print(
-        f"{len(brain.registry.names())} tools available "
-        f"({'/tools' if False else 'see --tools'})."
-    )
+    print(f"{len(brain.registry.names())} tools available (see --tools).")
+
+    # -- the heartbeat ------------------------------------------------------
+    heartbeat = None
+    if cfg.heartbeat.enabled and not args.no_heartbeat:
+        if PAUSE_FILE.exists():
+            print("Heartbeat: stopped (kill switch engaged — run --resume to restart).")
+        else:
+            hb_dict = {
+                "poll_seconds": cfg.heartbeat.poll_seconds,
+                "quiet_hours_enabled": cfg.heartbeat.quiet_hours_enabled,
+                "quiet_hours_start": cfg.heartbeat.quiet_hours_start,
+                "quiet_hours_end": cfg.heartbeat.quiet_hours_end,
+                "checks": cfg.heartbeat.checks,
+            }
+            heartbeat = Heartbeat(hb_schedule, inbox, hb_dict, log=log.write)
+
+            cleared = hb_schedule.clear_running_flags()
+            if cleared:
+                log.write(
+                    source="heartbeat",
+                    status="recovered",
+                    detail=f"cleared {cleared} stale in-flight marker(s)",
+                )
+
+            # Catch-up on return: anything noticed while you were away is shown
+            # now, rather than having been delivered once into the void.
+            if cfg.heartbeat.catch_up_on_start:
+                missed = heartbeat.catch_up(mark_delivered=True)
+                if missed:
+                    print(f"\nWhile you were away — {len(missed)} notice(s):")
+                    for notice in missed:
+                        flag = "!" if notice.urgent else "·"
+                        print(f"  {flag} {notice.title}")
+                        if notice.body:
+                            for line in notice.body.splitlines():
+                                print(f"      {line}")
+                    print("  (clear with --dismiss)\n")
+
+            heartbeat.start()
+            print(
+                f"Heartbeat: running ({len(heartbeat.checks)} checks, "
+                f"quiet hours {heartbeat.quiet.describe()})."
+            )
+
+    pending = inbox.count_pending()
+    if pending:
+        print(f"Inbox: {pending} notice(s) waiting (see --inbox).")
+
     print("Type a message. /reset forgets this session, /quit exits.\n")
 
     while True:
@@ -364,8 +482,22 @@ def main(argv: list[str] | None = None) -> int:
             brain.reset()
             print("(session cleared)")
             continue
+        if text == "/inbox":
+            waiting = inbox.pending()
+            if not waiting:
+                print("(inbox empty)")
+            for notice in waiting:
+                flag = "!" if notice.urgent else "·"
+                print(f"  {flag} [{notice.id}] {notice.title}")
+            continue
+        if text == "/dismiss":
+            print(f"(dismissed {inbox.dismiss_all()} notice(s))")
+            continue
 
         _run_turn(brain, name, text)
+
+    if heartbeat is not None:
+        heartbeat.stop()
 
     print("Goodbye.")
     return 0

@@ -134,3 +134,55 @@ voice:
   # "it broke".
   thinking_cue: true
   min_sentence_chars: 2
+
+# ---------------------------------------------------------------------------
+# The heartbeat — the assistant reaching out on its own.
+#
+# Quiet by default: it earns the right to interrupt, it does not assume it.
+# ---------------------------------------------------------------------------
+heartbeat:
+  # Master switch. Also toggled at runtime by the PAUSED file (the kill switch):
+  #   touch state/PAUSED     # stop all proactive behaviour
+  #   rm state/PAUSED        # resume
+  enabled: true
+
+  # How often the loop wakes to see whether anything is due.
+  poll_seconds: 5
+
+  # Non-urgent notices wait for waking hours. Only "urgent" interrupts at night.
+  quiet_hours_enabled: true
+  quiet_hours_start: "22:00"
+  quiet_hours_end: "07:00"
+
+  # Show what was noticed while you were away, on return. This is the
+  # catch-up-on-return path — notices are held, never delivered once and lost.
+  catch_up_on_start: true
+
+  # Each check: what to look at, how often, and whether it is worth surfacing.
+  # Tune these freely — nothing here needs a code change.
+  checks:
+    clock:
+      enabled: true
+      # A deliberately trivial check, for verifying the loop end to end.
+      # Create the trigger file to make it fire on purpose:
+      #   echo "testing" > /tmp/jarvis-trigger
+      interval_seconds: 60
+      trigger_file: /tmp/jarvis-trigger
+      trigger_title: "Test condition met"
+      # quiet | normal | urgent — how much this may intrude.
+      level: normal
+
+    notes:
+      enabled: true
+      interval_seconds: 3600
+      # Surface only once the note count reaches this.
+      threshold: 10
+      level: quiet
+
+    messages:
+      enabled: true
+      interval_seconds: 900
+      # Only flag unread messages older than this. A check that fires the
+      # instant anything arrives is a notification, not an assistant.
+      min_age_minutes: 60
+      level: normal

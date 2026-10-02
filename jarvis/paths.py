@@ -14,6 +14,11 @@ STATE_DIR = ROOT / "state"
 NOTES_DIR = STATE_DIR / "notes"
 MESSAGES_FILE = STATE_DIR / "messages.json"
 MEMORY_FILE = STATE_DIR / "memory.txt"
+# Tier 5 — the heartbeat
+SCHEDULE_FILE = STATE_DIR / "schedule.json"
+INBOX_FILE = STATE_DIR / "inbox.json"
+AUDIT_FILE = STATE_DIR / "audit.log"
+PAUSE_FILE = STATE_DIR / "PAUSED"
 
 
 def ensure_dirs() -> None:
