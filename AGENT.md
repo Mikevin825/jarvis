@@ -124,8 +124,8 @@ never delivered once and lost. Quiet hours are respected for non-urgent items.
 | 2 | The hands — tool registry | ✅ done |
 | 3 | The ears and mouth — push-to-talk voice | ✅ done |
 | 4 | The memory — durable facts across restarts | ✅ done |
-| 5 | The heartbeat — proactive checks | ⬜ next |
-| 6 | The rails — confirmation gate, config, audit, kill switch | ⬜ |
+| 5 | The heartbeat — proactive checks | ✅ done |
+| 6 | The rails — confirmation gate, config, audit, kill switch | ⬜ next |
 
 ## Tier 1 verification (what "done" means)
 
@@ -277,3 +277,82 @@ does not mean dumping the whole store into every prompt.
   destructive action.
 
 `state/` is git-ignored — memory is private and never committed.
+
+## Tier 5 verification (what "done" means)
+
+Configure a check with a short interval and a condition you can trigger on
+purpose, and confirm it surfaces — once, in the calm log or as an interruption
+depending on how noteworthy you marked it. Close the interface, trigger the
+condition, reopen, and confirm the notice was **held for you**, not lost.
+Restart and confirm the schedule resumes instead of refiring everything.
+Dismiss a surfaced item and it clears.
+
+## The heartbeat
+
+A background loop that runs scheduled checks and routes anything noteworthy to a
+single place you will see it. **Quiet by default** — it earns interruptions, it
+does not assume them.
+
+| Command | What it does |
+|---|---|
+| `jarvis-heartbeat run` | Run the loop in the foreground |
+| `jarvis-heartbeat run --once` | One pass, then exit |
+| `jarvis-heartbeat status` | What the heartbeat is doing, and when each check is next due |
+| `jarvis-heartbeat inbox` | Notices waiting for you |
+| `jarvis-heartbeat trigger <check>` | Make a check due right now |
+| `jarvis-heartbeat dismiss` | Clear the inbox |
+| `jarvis-heartbeat pause` / `resume` | The kill switch |
+| `jarvis --inbox` / `--dismiss` | Same, from the main command |
+
+### The rules, and where each one lives
+
+| Rule | How it is enforced |
+|---|---|
+| Quiet by default | A check returns `surfaced=False` unless it is genuinely worth attention. Most runs produce nothing. |
+| Don't drop what you weren't there to see | Notices are written to the inbox first and marked delivered only once shown. `catch_up()` hands over the rest on return. |
+| Respect quiet hours | `QuietHours` holds non-urgent notices; they are still **written** (undelivered), never discarded. Only `urgent` interrupts. |
+| Never block waiting on a human | Nothing in the loop waits on the user. Anything that would is deferred to the inbox with a safe default. |
+| Survive restarts | Due times persist in `state/schedule.json`, so a restart resumes rather than refiring everything. |
+| No overlapping runs | A check still marked in-flight is skipped, not stacked. |
+| Recover from a crash | Stale in-flight markers are cleared on startup — otherwise a check would silently never fire again. |
+| Back off a broken check | Consecutive failures multiply the interval (up to 8×) instead of retrying at full rate forever. |
+| Every item dismissible | `Inbox.dismiss` / `dismiss_all`, and `jarvis --dismiss`. |
+
+### The kill switch
+
+```bash
+jarvis --pause     # stop all proactive behaviour; you can still talk
+jarvis --resume    # start it again
+```
+
+It is a file (`state/PAUSED`), so it works even if the assistant is not running —
+the heartbeat refuses to start while it exists.
+
+### Checks
+
+| Check | Default interval | Surfaces when |
+|---|---|---|
+| `clock` | 60s | A trigger file exists (a condition you can create on purpose), or on the hour. |
+| `notes` | 1h | The note count reaches a threshold. |
+| `messages` | 15m | Unread messages have been waiting longer than `min_age_minutes`. |
+
+Tune intervals, thresholds, and intrusion level under `heartbeat.checks` in
+`config.yaml` — **no code change**. Adding a check means one class in
+`jarvis/heartbeat/checks.py` plus a config block; the loop never changes.
+
+### The audit log
+
+`state/audit.log` is plain text, one line per event, including the checks that
+produced nothing — so a silent check is visibly alive rather than suspiciously
+quiet.
+
+```
+2026-10-02 11:28:30  clock         surfaced   trigger file present  (0.00s)
+2026-10-02 11:28:30  notes         quiet      1 notes  (0.01s)
+```
+
+### Moving it to an always-on host
+
+The loop is deliberately ignorant of which machine it is on. Running it on a
+server that never sleeps is a relocation — copy the project, run
+`jarvis-heartbeat run` — not a rewrite.

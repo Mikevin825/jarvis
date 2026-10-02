@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Convenience wrapper so you do not have to remember the module path.
+exec "$(dirname "$0")/.venv/bin/python" -m jarvis.heartbeat_main "$@"
