@@ -120,6 +120,149 @@ class EspeakSpeaker(_SubprocessSpeaker):
             path.unlink(missing_ok=True)
 
 
+class EdgeTtsSpeaker(_SubprocessSpeaker):
+    """Free neural voices from Microsoft Edge's read-aloud service.
+
+    No API key and no account. Voices are markedly more natural than espeak, and
+    synthesis is fast enough for a spoken turn. It does need the network, and it
+    is an undocumented service, so it can change without notice — which is why
+    the local piper option exists as well.
+    """
+
+    def __init__(
+        self,
+        *,
+        voice: str = "en-GB-RyanNeural",
+        rate: str = "+0%",
+        volume: str = "+0%",
+        pitch: str = "+0Hz",
+    ) -> None:
+        super().__init__()
+        self.voice = voice
+        self.rate = rate
+        self.volume = volume
+        self.pitch = pitch
+
+    def speak(self, text: str) -> None:
+        text = text.strip()
+        if not text:
+            return
+
+        try:
+            import edge_tts
+        except ImportError as exc:
+            raise SpeechError(
+                "edge-tts is not installed.\n"
+                "  Install it with: .venv/bin/pip install edge-tts"
+            ) from exc
+
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            path = Path(tmp.name)
+        try:
+            communicate = edge_tts.Communicate(
+                text,
+                self.voice,
+                rate=self.rate,
+                volume=self.volume,
+                pitch=self.pitch,
+            )
+            # save_sync does the async work internally, so the voice loop stays
+            # synchronous like every other speaker.
+            communicate.save_sync(str(path))
+            if not path.exists() or path.stat().st_size == 0:
+                raise SpeechError("edge-tts returned no audio.")
+            self._play(path)
+        except SpeechError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - network + service can fail many ways
+            raise SpeechError(
+                f"edge-tts failed: {type(exc).__name__}: {exc}. "
+                "It needs a network connection; set tts.provider: piper for "
+                "fully offline speech."
+            ) from exc
+        finally:
+            path.unlink(missing_ok=True)
+
+
+class PiperSpeaker(_SubprocessSpeaker):
+    """Fully offline neural speech.
+
+    The model is loaded once and kept in memory, so subsequent sentences are
+    fast. Voices are downloaded ahead of time — see AGENT.md for the command.
+    """
+
+    def __init__(
+        self,
+        *,
+        voice: str = "en_GB-alan-medium",
+        voices_dir: str | None = None,
+        length_scale: float = 1.0,
+    ) -> None:
+        super().__init__()
+        self.voice = voice
+        self.length_scale = length_scale
+        self.voices_dir = Path(
+            voices_dir or Path.home() / ".local" / "share" / "piper-voices"
+        ).expanduser()
+        self._model = None
+
+    def _model_path(self) -> Path:
+        return self.voices_dir / f"{self.voice}.onnx"
+
+    def _load(self):
+        if self._model is None:
+            try:
+                from piper import PiperVoice
+            except ImportError as exc:
+                raise SpeechError(
+                    "piper is not installed.\n"
+                    "  Install it with: .venv/bin/pip install piper-tts"
+                ) from exc
+
+            path = self._model_path()
+            if not path.exists():
+                raise SpeechError(
+                    f"The piper voice '{self.voice}' is not downloaded.\n"
+                    f"  Expected at: {path}\n"
+                    "  Download it with:\n"
+                    "    .venv/bin/python -c \"from pathlib import Path; "
+                    "from piper.download_voices import download_voice; "
+                    f"download_voice('{self.voice}', "
+                    "Path.home()/'.local/share/piper-voices')\""
+                )
+            try:
+                self._model = PiperVoice.load(str(path))
+            except Exception as exc:  # noqa: BLE001
+                raise SpeechError(
+                    f"Could not load the piper voice '{self.voice}': {exc}"
+                ) from exc
+        return self._model
+
+    def speak(self, text: str) -> None:
+        text = text.strip()
+        if not text:
+            return
+
+        import wave
+
+        model = self._load()
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            path = Path(tmp.name)
+        try:
+            from piper.config import SynthesisConfig
+
+            config = SynthesisConfig(length_scale=self.length_scale)
+            with wave.open(str(path), "wb") as wav:
+                model.synthesize_wav(text, wav, syn_config=config)
+            self._play(path)
+        except SpeechError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise SpeechError(f"piper synthesis failed: {exc}") from exc
+        finally:
+            path.unlink(missing_ok=True)
+
+
 class ElevenLabsSpeaker(_SubprocessSpeaker):
     """Cloud speech via ElevenLabs. Streams, so playback starts before the
     sentence is fully synthesised."""
@@ -196,13 +339,28 @@ def build_speaker(cfg) -> Speaker:
             raise SpeechError(
                 "tts.provider is 'elevenlabs' but no API key was found.\n"
                 "  Fix: set ELEVENLABS_API_KEY in .env,\n"
-                "  or set tts.provider: espeak in config.yaml to speak locally."
+                "  or set tts.provider: edge in config.yaml for a free neural voice."
             )
         return ElevenLabsSpeaker(
             cfg.api_key,
             voice_id=cfg.voice,
             model=cfg.model,
             timeout_seconds=cfg.timeout_seconds,
+        )
+
+    if cfg.provider == "edge":
+        return EdgeTtsSpeaker(
+            voice=cfg.voice,
+            rate=cfg.rate_str,
+            volume=cfg.volume,
+            pitch=cfg.pitch,
+        )
+
+    if cfg.provider == "piper":
+        return PiperSpeaker(
+            voice=cfg.voice,
+            voices_dir=cfg.voices_dir,
+            length_scale=cfg.length_scale,
         )
 
     if cfg.provider == "espeak":

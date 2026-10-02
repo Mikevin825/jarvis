@@ -188,11 +188,15 @@ class VoiceLoop:
 
     # -- one spoken turn ----------------------------------------------------
 
-    def handle_recording(self, path: Path) -> None:
+    def handle_recording(self, path: Path, consume: bool = True) -> None:
         """Run one complete spoken turn from a recording.
 
         Public so the whole path can be exercised from a file, with no
         microphone involved — the most useful way to debug voice.
+
+        `consume` deletes the recording once it has been transcribed. That is
+        right for a real capture (the file is disposable) but wrong for a test
+        fixture you want to reuse, so the CLI passes consume=False.
         """
         print("\r(transcribing…)                    ", end="", flush=True)
         started = time.time()
@@ -202,7 +206,8 @@ class VoiceLoop:
             print(f"\r[cannot transcribe] {exc}")
             return
         finally:
-            path.unlink(missing_ok=True)
+            if consume:
+                path.unlink(missing_ok=True)
 
         if not text:
             print("\r(heard nothing)                    ")

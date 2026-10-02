@@ -81,6 +81,13 @@ class TtsConfig:
     rate: float
     timeout_seconds: float
     api_key: str | None
+    # edge-tts uses string modifiers like "+10%" and "+0Hz"
+    rate_str: str = "+0%"
+    volume: str = "+0%"
+    pitch: str = "+0Hz"
+    # piper
+    voices_dir: str | None = None
+    length_scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -177,6 +184,11 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
             rate=float(tts_block.get("rate", 165)),
             timeout_seconds=float(tts_block.get("timeout_seconds", 60)),
             api_key=tts_key,
+            rate_str=str(tts_block.get("rate_str", "+0%")),
+            volume=str(tts_block.get("volume", "+0%")),
+            pitch=str(tts_block.get("pitch", "+0Hz")),
+            voices_dir=tts_block.get("voices_dir"),
+            length_scale=float(tts_block.get("length_scale", 1.0)),
         ),
         voice=VoiceConfig(
             ptt_key=str(voice_raw.get("ptt_key", "space")).lower(),

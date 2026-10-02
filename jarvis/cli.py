@@ -194,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
         if not path.exists():
             print(f"no such file: {path}", file=sys.stderr)
             return 2
-        loop.handle_recording(path)
+        loop.handle_recording(path, consume=False)  # keep the fixture
         return 0
 
     # -- the voice interface -------------------------------------------------

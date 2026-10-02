@@ -73,10 +73,31 @@ stt:
 # The mouth — text to speech.
 # ---------------------------------------------------------------------------
 tts:
-  # "espeak" is local and instant (robotic, but free — good for building).
-  # "elevenlabs" is the reference build's choice: natural voices, needs
-  # ELEVENLABS_API_KEY in .env.
-  provider: espeak
+  # "edge"  — free Microsoft neural voices. No key, no account, needs network.
+  #           The best quality-per-effort option; recommended.
+  # "piper" — fully offline neural voices. No key, no network, very fast.
+  # "espeak" — local and instant, but robotic.
+  # "elevenlabs" — the reference build's choice: most natural, needs a key.
+  provider: edge
+
+  edge:
+    # Browse voices: .venv/bin/python -m edge_tts --list-voices
+    # Good British male: en-GB-RyanNeural, en-GB-ThomasNeural
+    # Good American male: en-US-AndrewNeural, en-US-BrianNeural
+    # Good British female: en-GB-SoniaNeural, en-GB-LibbyNeural
+    voice: en-GB-RyanNeural
+    rate_str: "+8%"     # slightly brisk — assistants should not dawdle
+    volume: "+0%"
+    pitch: "+0Hz"
+
+  piper:
+    # Download a voice first:
+    #   .venv/bin/python -c "from pathlib import Path; \
+    #     from piper.download_voices import download_voice; \
+    #     download_voice('en_GB-alan-medium', Path.home()/'.local/share/piper-voices')"
+    voice: en_GB-alan-medium
+    # >1.0 slows speech down, <1.0 speeds it up.
+    length_scale: 1.0
 
   espeak:
     voice: en-gb
