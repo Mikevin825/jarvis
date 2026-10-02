@@ -22,7 +22,7 @@ brain:
   temperature: 0.7
   max_output_tokens: 2048
   # Seconds to wait on the model before giving up with a clear message.
-  timeout_seconds: 60
+  timeout_seconds: 120
 
   gemini:
     # Gemini 3 Pro was requested, but the Pro preview model has NO quota on a
@@ -43,5 +43,67 @@ brain:
   ollama:
     # Local fallback — needs no API key. Handy for offline development and for
     # verifying the harness when no cloud key is configured.
+    # A small model on CPU is slow to first token; raise brain.timeout_seconds
+    # above (e.g. 300) if you use this as your daily brain.
     model: qwen2.5-coder:3b
     base_url: http://localhost:11434
+
+# ---------------------------------------------------------------------------
+# The ears — speech to text.
+# ---------------------------------------------------------------------------
+stt:
+  # "whisper" runs entirely on this machine: no key, no network, no cost.
+  # "deepgram" is the cloud option from the reference build: faster and more
+  # accurate, but needs DEEPGRAM_API_KEY in .env.
+  provider: whisper
+
+  whisper:
+    # tiny.en / base.en / small.en — bigger is more accurate and slower.
+    model: base.en
+    device: cpu
+    compute_type: int8
+
+  deepgram:
+    model: nova-2
+    language: en
+    timeout_seconds: 60
+    api_key_env: DEEPGRAM_API_KEY
+
+# ---------------------------------------------------------------------------
+# The mouth — text to speech.
+# ---------------------------------------------------------------------------
+tts:
+  # "espeak" is local and instant (robotic, but free — good for building).
+  # "elevenlabs" is the reference build's choice: natural voices, needs
+  # ELEVENLABS_API_KEY in .env.
+  provider: espeak
+
+  espeak:
+    voice: en-gb
+    rate: 165
+
+  elevenlabs:
+    # Pick a voice at https://elevenlabs.io/voice-library and paste its id here.
+    voice: 21m00Tcm4TlvDq8ikWAM
+    model: eleven_turbo_v2_5
+    timeout_seconds: 60
+    api_key_env: ELEVENLABS_API_KEY
+
+# ---------------------------------------------------------------------------
+# The voice interface itself.
+# ---------------------------------------------------------------------------
+voice:
+  # Hold to talk, release to send. Push-to-talk first: it removes a whole class
+  # of "is it listening?" bugs.
+  ptt_key: space
+  # Press to cut JARVIS off mid-sentence (and to quit when it is silent).
+  interrupt_key: esc
+  speak_replies: true
+  # Print what it *thought* you said next to the reply. Keep this on while
+  # building: when it answers the wrong question, it shows whether the ears or
+  # the brain was at fault.
+  show_transcript: true
+  # Print a cue the moment you release the key, so silence never reads as
+  # "it broke".
+  thinking_cue: true
+  min_sentence_chars: 2

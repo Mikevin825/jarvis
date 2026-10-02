@@ -9,3 +9,6 @@ __pycache__/
 # Tier 4+ durable state (memory, schedule, notices, audit log)
 state/
 *.log
+
+# Voice test fixtures
+# (small wavs used to exercise the voice path without a microphone)

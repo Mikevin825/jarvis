@@ -122,8 +122,8 @@ never delivered once and lost. Quiet hours are respected for non-urgent items.
 | 0 | Interview + this spec | ✅ done |
 | 1 | The brain — text conversation loop | ✅ done |
 | 2 | The hands — tool registry | ✅ done |
-| 3 | The ears and mouth — push-to-talk voice | ⬜ next |
-| 4 | The memory — durable facts across restarts | ⬜ |
+| 3 | The ears and mouth — push-to-talk voice | ✅ done |
+| 4 | The memory — durable facts across restarts | ⬜ next |
 | 5 | The heartbeat — proactive checks | ⬜ |
 | 6 | The rails — confirmation gate, config, audit, kill switch | ⬜ |
 
@@ -165,3 +165,59 @@ a real provider is a credentials task later, and the tool shape will not change.
 - Tool descriptions are written for a reader, and inputs are typed and validated.
 - Consequential tools (send, spend, delete, change settings) are flagged and
   **fail closed** until Tier 6 builds the real confirmation gate.
+
+## Tier 3 verification (what "done" means)
+
+Hold the key, ask a question that needs a tool, release, and hear a spoken
+answer that used the tool — with the transcript visible so you can confirm it
+heard you correctly. Start a new turn mid-reply and it stops to listen. The
+typed interface still works exactly as it did in Tier 2.
+
+## The voice layer
+
+Voice is an adapter on the edges of the brain, never a fork of it. A spoken turn
+is transcribed to text and handed to `Brain.ask` — the same entry point a typed
+turn uses. Nothing in `jarvis/voice/` re-implements the agent.
+
+| Piece | Providers | Notes |
+|---|---|---|
+| Ears (`stt`) | `whisper` (local, default), `deepgram` (cloud) | Whisper needs no key and runs offline. |
+| Mouth (`tts`) | `espeak` (local, default), `elevenlabs` (cloud) | espeak is robotic but instant and free. |
+
+**Both default to local**, so the entire voice loop works today with no signups
+and no cost. Deepgram and ElevenLabs are wired and ready — add the key to `.env`
+and change one line in `config.yaml` to switch either one.
+
+### How a spoken turn flows
+
+1. Hold **space**, speak, release. Push-to-talk means the start and end of a turn
+   are never guessed at.
+2. The recording is transcribed. What it *thought* you said is printed, always,
+   so a wrong answer can be traced to the ears or the brain.
+3. `(thinking…)` fires the instant you release the key, so silence never reads as
+   "it broke".
+4. The reply streams and is **spoken sentence by sentence** — the first sentence
+   plays while the rest is still being written.
+5. Press **Esc** while it is talking to cut it off. Holding space also interrupts
+   and starts listening.
+
+### Three decisions worth knowing
+
+- **Local STT decodes audio itself.** faster-whisper's PyAV path passes a kwarg
+  that recent PyAV versions removed, which breaks transcription outright. The
+  harness decodes the WAV with the standard library and hands whisper a raw
+  array — more robust, and faster, since audio is never decoded twice.
+- **A tapped key is not speech.** Recordings under ~2 KB are discarded rather
+  than sent to the transcriber as silence.
+- **It cannot hear itself.** The microphone is only live while the key is held,
+  and speech is stopped before capture begins. Push-to-talk sidesteps the
+  self-listening problem entirely; this matters before any move to an open mic.
+
+### Debugging voice without a microphone
+
+```bash
+.venv/bin/python -m jarvis --say "test the mouth"          # speak, no mic
+.venv/bin/python -m jarvis --hear recording.wav            # transcribe a file
+.venv/bin/python -m jarvis --voice-file recording.wav      # one full spoken turn
+.venv/bin/python -m jarvis --voice                          # the real thing
+```

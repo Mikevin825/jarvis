@@ -95,6 +95,29 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="list the registered tools and exit",
     )
+    parser.add_argument(
+        "--voice",
+        action="store_true",
+        help="start the push-to-talk voice interface instead of typing",
+    )
+    parser.add_argument(
+        "--say",
+        metavar="TEXT",
+        help="speak this text aloud and exit (tests the voice output path)",
+    )
+    parser.add_argument(
+        "--hear",
+        metavar="WAV",
+        help="transcribe an audio file and exit (tests the ears in isolation)",
+    )
+    parser.add_argument(
+        "--voice-file",
+        metavar="WAV",
+        help=(
+            "run one complete spoken turn from a wav file: transcribe, think, "
+            "speak (tests the whole voice path without a microphone)"
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -107,6 +130,111 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     name = cfg.assistant.name
+
+    # -- voice output only: speak and exit (isolates the mouth) --------------
+    if args.say is not None:
+        from .voice import SpeechError, build_speaker
+
+        try:
+            build_speaker(cfg.tts).speak(args.say)
+        except SpeechError as exc:
+            print(f"cannot speak: {exc}", file=sys.stderr)
+            return 2
+        return 0
+
+    # -- ears only: transcribe a file and exit (isolates the ears) -----------
+    if args.hear is not None:
+        from pathlib import Path
+
+        from .voice import TranscriptionError, build_transcriber
+
+        path = Path(args.hear)
+        try:
+            text = build_transcriber(cfg.stt).transcribe(path)
+        except TranscriptionError as exc:
+            print(f"cannot transcribe: {exc}", file=sys.stderr)
+            return 2
+        print(text or "(heard nothing)")
+        return 0
+
+    # -- one full spoken turn from a file (isolates nothing — tests it all) --
+    if args.voice_file is not None:
+        from pathlib import Path
+
+        from .voice import (
+            SpeechError,
+            TranscriptionError,
+            build_speaker,
+            build_transcriber,
+        )
+        from .voice.loop import VoiceConfig, VoiceLoop
+
+        try:
+            transcriber = build_transcriber(cfg.stt)
+            speaker = build_speaker(cfg.tts)
+        except (TranscriptionError, SpeechError) as exc:
+            print(f"cannot start voice: {exc}", file=sys.stderr)
+            return 2
+
+        loop = VoiceLoop(
+            brain,
+            transcriber,
+            speaker,
+            config=VoiceConfig(
+                ptt_key=cfg.voice.ptt_key,
+                interrupt_key=cfg.voice.interrupt_key,
+                speak_replies=cfg.voice.speak_replies,
+                show_transcript=cfg.voice.show_transcript,
+                thinking_cue=cfg.voice.thinking_cue,
+                min_sentence_chars=cfg.voice.min_sentence_chars,
+            ),
+            registry=brain.registry,
+        )
+        path = Path(args.voice_file)
+        if not path.exists():
+            print(f"no such file: {path}", file=sys.stderr)
+            return 2
+        loop.handle_recording(path)
+        return 0
+
+    # -- the voice interface -------------------------------------------------
+    if args.voice:
+        from .voice import (
+            CaptureError,
+            SpeechError,
+            TranscriptionError,
+            build_speaker,
+            build_transcriber,
+        )
+        from .voice.loop import VoiceConfig, VoiceLoop
+
+        try:
+            transcriber = build_transcriber(cfg.stt)
+            speaker = build_speaker(cfg.tts)
+        except (TranscriptionError, SpeechError) as exc:
+            print(f"cannot start voice: {exc}", file=sys.stderr)
+            return 2
+
+        loop = VoiceLoop(
+            brain,
+            transcriber,
+            speaker,
+            config=VoiceConfig(
+                ptt_key=cfg.voice.ptt_key,
+                interrupt_key=cfg.voice.interrupt_key,
+                speak_replies=cfg.voice.speak_replies,
+                show_transcript=cfg.voice.show_transcript,
+                thinking_cue=cfg.voice.thinking_cue,
+                min_sentence_chars=cfg.voice.min_sentence_chars,
+            ),
+            registry=brain.registry,
+        )
+        loop.brain.name = name  # so the loop can greet with the right name
+        try:
+            return loop.run()
+        except CaptureError as exc:
+            print(f"cannot capture audio: {exc}", file=sys.stderr)
+            return 2
 
     if args.tools:
         registry = brain.registry

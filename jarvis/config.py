@@ -62,9 +62,44 @@ class BrainConfig:
 
 
 @dataclass(frozen=True)
+class SttConfig:
+    provider: str
+    model: str
+    language: str
+    timeout_seconds: float
+    # Local whisper options
+    device: str
+    compute_type: str
+    api_key: str | None
+
+
+@dataclass(frozen=True)
+class TtsConfig:
+    provider: str
+    model: str
+    voice: str
+    rate: float
+    timeout_seconds: float
+    api_key: str | None
+
+
+@dataclass(frozen=True)
+class VoiceConfig:
+    ptt_key: str
+    interrupt_key: str
+    speak_replies: bool
+    show_transcript: bool
+    thinking_cue: bool
+    min_sentence_chars: int
+
+
+@dataclass(frozen=True)
 class Config:
     assistant: AssistantConfig
     brain: BrainConfig
+    stt: SttConfig
+    tts: TtsConfig
+    voice: VoiceConfig
 
 
 def _require(mapping: dict, key: str, where: str):
@@ -81,6 +116,9 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
 
     assistant_raw = raw.get("assistant") or {}
     brain_raw = raw.get("brain") or {}
+    stt_raw = raw.get("stt") or {}
+    tts_raw = raw.get("tts") or {}
+    voice_raw = raw.get("voice") or {}
 
     provider = _require(brain_raw, "provider", "brain")
     provider_block = (brain_raw.get(provider) or {})
@@ -96,6 +134,18 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     if key_env:
         api_key = os.environ.get(key_env)
 
+    stt_provider = stt_raw.get("provider", "whisper")
+    stt_block = stt_raw.get(stt_provider) or {}
+    stt_key = None
+    if stt_block.get("api_key_env"):
+        stt_key = os.environ.get(stt_block["api_key_env"])
+
+    tts_provider = tts_raw.get("provider", "espeak")
+    tts_block = tts_raw.get(tts_provider) or {}
+    tts_key = None
+    if tts_block.get("api_key_env"):
+        tts_key = os.environ.get(tts_block["api_key_env"])
+
     return Config(
         assistant=AssistantConfig(
             name=_require(assistant_raw, "name", "assistant"),
@@ -110,5 +160,30 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
             model=_require(provider_block, "model", f"brain.{provider}"),
             base_url=_require(provider_block, "base_url", f"brain.{provider}"),
             api_key=api_key,
+        ),
+        stt=SttConfig(
+            provider=stt_provider,
+            model=stt_block.get("model", "base.en"),
+            language=stt_block.get("language", "en"),
+            timeout_seconds=float(stt_block.get("timeout_seconds", 60)),
+            device=stt_block.get("device", "cpu"),
+            compute_type=stt_block.get("compute_type", "int8"),
+            api_key=stt_key,
+        ),
+        tts=TtsConfig(
+            provider=tts_provider,
+            model=tts_block.get("model", "eleven_turbo_v2_5"),
+            voice=tts_block.get("voice", "en-gb"),
+            rate=float(tts_block.get("rate", 165)),
+            timeout_seconds=float(tts_block.get("timeout_seconds", 60)),
+            api_key=tts_key,
+        ),
+        voice=VoiceConfig(
+            ptt_key=str(voice_raw.get("ptt_key", "space")).lower(),
+            interrupt_key=str(voice_raw.get("interrupt_key", "esc")).lower(),
+            speak_replies=bool(voice_raw.get("speak_replies", True)),
+            show_transcript=bool(voice_raw.get("show_transcript", True)),
+            thinking_cue=bool(voice_raw.get("thinking_cue", True)),
+            min_sentence_chars=int(voice_raw.get("min_sentence_chars", 2)),
         ),
     )
