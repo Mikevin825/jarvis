@@ -16,3 +16,8 @@ pytest
 .pytest_cache/
 __pycache__/
 *.pyc
+
+# galaxy (node)
+galaxy/node_modules/
+galaxy/dist/
+galaxy/.vite/

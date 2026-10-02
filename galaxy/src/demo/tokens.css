@@ -1,0 +1,37 @@
+/**
+ * Design tokens.
+ *
+ * Every colour the UI uses lives here and nowhere else. The scene's palette is
+ * separate — it lives in the state table, because it is data the renderer reads
+ * rather than chrome around it.
+ *
+ * Dark only, per the build decision. The light set is defined but unused, ready
+ * if that changes.
+ */
+
+:root,
+[data-theme="dark"] {
+  --bg: #05070d;
+  --panel: rgba(14, 18, 28, 0.72);
+  --panel-border: rgba(140, 170, 200, 0.14);
+  --fg: #e6edf3;
+  --fg-muted: #7d8b9c;
+  --accent: #ffc247;
+  --accent-dim: rgba(255, 194, 71, 0.16);
+  --accent-fg: #1a1204;
+
+  --radius: 10px;
+  --gap: 8px;
+  --font: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+}
+
+[data-theme="light"] {
+  --bg: #eef1f6;
+  --panel: rgba(255, 255, 255, 0.82);
+  --panel-border: rgba(30, 50, 80, 0.14);
+  --fg: #16202c;
+  --fg-muted: #5b6b7d;
+  --accent: #b8791a;
+  --accent-dim: rgba(184, 121, 26, 0.14);
+  --accent-fg: #ffffff;
+}

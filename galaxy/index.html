@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>JARVIS — galaxy</title>
+    <link rel="stylesheet" href="/src/demo/tokens.css" />
+    <link rel="stylesheet" href="/src/demo/demo.css" />
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+
+    <div class="hud">
+      <div class="hud__row">
+        <span class="hud__label">state</span>
+        <span class="hud__value" id="state-name">idle</span>
+      </div>
+      <div class="hud__row">
+        <span class="hud__label">fps</span>
+        <span class="hud__value" id="fps">–</span>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="controls__states" id="states"></div>
+      <div class="controls__toggles">
+        <button class="toggle" id="audio-toggle" type="button">synthetic audio: on</button>
+        <button class="toggle" id="perf-toggle" type="button">performance: auto</button>
+        <button class="toggle" id="motion-toggle" type="button">reduced motion: off</button>
+      </div>
+    </div>
+
+    <!-- Screen readers get told the state, since the orb cannot say it. -->
+    <div class="sr-only" role="status" aria-live="polite" id="live-region">
+      State: idle
+    </div>
+
+    <script type="module" src="/src/demo/main.ts"></script>
+  </body>
+</html>

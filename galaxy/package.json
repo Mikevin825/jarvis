@@ -1,0 +1,21 @@
+{
+  "name": "jarvis-galaxy",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A living galaxy for JARVIS: a voice-reactive orb in deep space.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@types/three": "^0.186.0",
+    "three": "^0.186.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
+  }
+}
