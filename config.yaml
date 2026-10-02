@@ -122,7 +122,11 @@ tts:
 voice:
   # Hold to talk, release to send. Push-to-talk first: it removes a whole class
   # of "is it listening?" bugs.
-  ptt_key: space
+  #
+  # NOT space. A bare space fires on every keystroke once this runs outside a
+  # terminal, which is exactly what happened the first time it was backgrounded.
+  # A single key ("f9") or a combination ("<ctrl>+<alt>+j") both work.
+  ptt_key: f9
   # Press to cut JARVIS off mid-sentence (and to quit when it is silent).
   interrupt_key: esc
   speak_replies: true

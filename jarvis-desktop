@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Launch the JARVIS desktop panel.
+#
+# Kept as a script rather than baked into the .desktop file so the working
+# directory and venv are resolved relative to this file, not to wherever the
+# launcher happens to run from.
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PY="$DIR/.venv/bin/python"
+
+if [[ ! -x "$PY" ]]; then
+    echo "No virtualenv found at $DIR/.venv" >&2
+    echo "Create it with:  python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
+    exit 1
+fi
+
+cd "$DIR"
+exec "$PY" -m jarvis.desktop "$@"

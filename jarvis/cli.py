@@ -225,6 +225,11 @@ def main(argv: list[str] | None = None) -> int:
             "where you have already decided — never for interactive use."
         ),
     )
+    parser.add_argument(
+        "--desktop",
+        action="store_true",
+        help="open the desktop panel (a window, not a terminal)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -367,6 +372,13 @@ def main(argv: list[str] | None = None) -> int:
             "delete a fact.\nJARVIS reads it at the start of every conversation."
         )
         return 0
+
+    if args.desktop:
+        # Hand off to the desktop entry point, which owns the window and its
+        # own gate. Importing here keeps tkinter out of the terminal path.
+        from .desktop.__main__ import main as desktop_main
+
+        return desktop_main()
 
     # -- list the voices an ElevenLabs key can actually use ------------------
     if args.voices:

@@ -445,8 +445,62 @@ Read-only actions are not logged as gated — they flow freely.
 `jarvis --pause` / `--resume`, backed by the `state/PAUSED` file. Stops all
 proactive behaviour while you can still talk to it.
 
-## Where to go next
+## The desktop panel
 
+JARVIS outside the terminal. A small window that shows what is happening, lets
+you talk with a button *or* the push-to-talk key, and gives the confirmation gate
+somewhere real to ask.
+
+```bash
+./jarvis-desktop          # or: .venv/bin/python -m jarvis --desktop
+```
+
+It is also in the application menu as **JARVIS** (`~/.local/share/applications/jarvis.desktop`).
+
+### Why the push-to-talk key changed
+
+It was **space**. That is fine in a terminal, where you are not typing prose into
+the assistant — but as a background desktop assistant, space is the most-typed
+key on the keyboard. Backgrounded once, it recorded three times with nobody
+touching it.
+
+The default is now **F9**. Combinations work too:
+
+```yaml
+ptt_key: f9                    # single key
+ptt_key: "<ctrl>+<alt>+j"      # combination
+```
+
+Matching is exact: `<ctrl>+<alt>+j` does not fire on `<ctrl>+<alt>+<shift>+j`, so
+it will not collide with other shortcuts. A bare modifier (`<ctrl>`) is rejected
+as a binding — you would trigger it merely reaching for a shortcut.
+
+### Design
+
+| Property | How |
+|---|---|
+| No new dependency | Plain `tkinter`, which ships with Python. |
+| One voice core | The panel **observes** `VoiceLoop` through `on_state` / `on_turn` / `on_tool` callbacks. It reimplements nothing. |
+| Thread-safe | Voice runs in a worker; every callback is marshalled onto the GUI thread through a queue. Touching tkinter from another thread is how GUIs corrupt. |
+| Click-to-talk | The button is the reliable path; the hotkey is the convenience. Neither depends on the other. |
+| Degrades, not breaks | If the hotkey listener fails, the button still works. |
+
+### The gate in the window
+
+`GuiGate` replaces the terminal prompt when the panel is running. It carries the
+same two properties as the CLI gate:
+
+- **Defaults to no.** The *Don't allow* button takes focus, so an accidental
+  Enter does not approve. Closing the dialog is a refusal.
+- **Times out to no.** An unanswered prompt expires (120s) into the safe default
+  — do nothing — rather than hanging the assistant. A gate waiting on a window
+  that no longer exists is never left dangling.
+- **One question at a time.** A second request while one is open is refused, not
+  stacked, so you always know what you are answering.
+
+Verified end to end: model → gate → window → click *Allow* → the action ran.
+
+## Where to go next
 The harness is shaped to accept these without a rewrite:
 
 - **More tools.** One self-contained module plus one line in
