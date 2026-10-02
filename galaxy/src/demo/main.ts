@@ -4,10 +4,15 @@
  * Buttons for every state, plus the toggles. This exists so each layer can be
  * checked on screen before the next is built — and it is the surface the real
  * JARVIS wiring will drive later.
+ *
+ * Layer 4: real audio capture with synthetic fallback. The orb rides the
+ * waveform of real audio when a mic or playback source is available, and
+ * falls back to synthetic levels when it isn't.
  */
 
 import { GalaxyEngine } from "../engine";
-import { syntheticLevels, smoothLevels, ZERO_LEVELS, type AudioLevels } from "../engine/audio";
+import { AudioCapture } from "../engine/audio-capture";
+import { syntheticLevels, smoothLevels, ZERO_LEVELS } from "../engine/audio";
 import { STATES, type AiState } from "../engine/state";
 
 const canvas = document.getElementById("scene") as HTMLCanvasElement;
@@ -18,6 +23,7 @@ const stateButtons = document.getElementById("states")!;
 const audioToggle = document.getElementById("audio-toggle")!;
 const perfToggle = document.getElementById("perf-toggle")!;
 const motionToggle = document.getElementById("motion-toggle")!;
+const micToggle = document.getElementById("mic-toggle")!;
 
 const engine = new GalaxyEngine(canvas, {
   reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
@@ -25,6 +31,8 @@ const engine = new GalaxyEngine(canvas, {
     perfToggle.textContent = `performance: ${enabled ? "on" : "off"}`;
   },
 });
+
+const capture = new AudioCapture();
 
 // -- state buttons --------------------------------------------------------
 
@@ -49,11 +57,11 @@ function selectState(state: AiState): void {
 
 // -- toggles --------------------------------------------------------------
 
-let syntheticAudio = true;
+let useRealAudio = true;
 audioToggle.addEventListener("click", () => {
-  syntheticAudio = !syntheticAudio;
-  audioToggle.textContent = `synthetic audio: ${syntheticAudio ? "on" : "off"}`;
-  audioToggle.setAttribute("aria-pressed", String(syntheticAudio));
+  useRealAudio = !useRealAudio;
+  audioToggle.textContent = `audio source: ${useRealAudio ? "real" : "synthetic"}`;
+  audioToggle.setAttribute("aria-pressed", String(useRealAudio));
 });
 
 let perfMode: "auto" | "on" | "off" = "auto";
@@ -71,11 +79,19 @@ motionToggle.addEventListener("click", () => {
   motionToggle.setAttribute("aria-pressed", String(reducedMotion));
 });
 
-// -- audio ----------------------------------------------------------------
-// No analyser yet (that arrives in Layer 4). Until then the synthetic envelope
-// keeps the orb alive so the shape can be judged.
+let micEnabled = true;
+micToggle.addEventListener("click", () => {
+  micEnabled = !micEnabled;
+  micToggle.textContent = `mic: ${micEnabled ? "on" : "off"}`;
+  micToggle.setAttribute("aria-pressed", String(micEnabled));
+  if (useRealAudio) {
+    capture.stop();
+    void capture.start();
+  }
+});
 
-let levels: AudioLevels = ZERO_LEVELS;
+// -- audio ----------------------------------------------------------------
+
 let elapsed = 0;
 
 // -- frame loop -----------------------------------------------------------
@@ -87,18 +103,19 @@ let fpsAccum = 0;
 
 function tick(): void {
   const delta = 1 / 60;
-
-  if (syntheticAudio) {
-    const state = engine.getState();
-    const speaking = state === "speaking" || state === "thinking";
-    const raw = syntheticLevels(elapsed, speaking);
-    levels = smoothLevels(levels, raw);
-  } else {
-    levels = smoothLevels(levels, ZERO_LEVELS);
-  }
-  engine.setLevels(levels);
-
   elapsed += delta;
+
+  const state = engine.getState();
+  const speaking = state === "speaking" || state === "thinking";
+
+  if (useRealAudio) {
+    const levels = capture.read(delta, speaking && micEnabled);
+    engine.setLevels(levels);
+  } else {
+    // Pure synthetic — no capture at all.
+    const raw = syntheticLevels(elapsed, speaking);
+    engine.setLevels(smoothLevels(ZERO_LEVELS, raw));
+  }
 
   // Rough frame counter for the HUD.
   frames++;
@@ -117,8 +134,22 @@ requestAnimationFrame(tick);
 
 window.addEventListener("resize", () => engine.resize());
 
+// Start audio capture on first user interaction (browsers require this).
+const startAudio = (): void => {
+  if (useRealAudio) {
+    void capture.start();
+  }
+  window.removeEventListener("click", startAudio);
+  window.removeEventListener("keydown", startAudio);
+};
+window.addEventListener("click", startAudio);
+window.addEventListener("keydown", startAudio);
+
 // Teardown for hot-reload during development: release the GL context rather
 // than leaking one on every edit.
 if (import.meta.hot) {
-  import.meta.hot.dispose(() => engine.dispose());
+  import.meta.hot.dispose(() => {
+    engine.dispose();
+    capture.stop();
+  });
 }
