@@ -40,7 +40,7 @@ bugs below findable.
 | Layer | What | Status |
 |---|---|---|
 | 1 | The orb — wireframe icosahedron, noise displacement, fresnel, glow shell, rings | ✅ done |
-| 2 | The sky — nebula, stars, bloom | ⬜ |
+| 2 | The sky — nebula, stars, bloom | ✅ done |
 | 3 | The star network — clusters, connections, dust | ⬜ |
 | 4 | States and voice — real audio taps | ⬜ (table and synthetic path done) |
 | 5 | Themes, performance, accessibility | ⬜ (perf + reduced motion done) |
@@ -64,3 +64,11 @@ capturing a real render at every layer rather than trusting that it looks right.
 `pkill -f "http.server 8791"` kills **itself** when the pattern appears in the
 invoking shell's own command line — `pkill -f` matches the full command line of
 every process, including the one running it. Kill by PID instead.
+
+## A third bug: stars that paint their cell
+
+A star field built on a hashed grid will show the grid if the star's glow is too
+soft. The falloff `size / (d * density * 0.06 + size)` reached the cell boundary,
+so every starred cell painted a soft square edge and the lattice became visible
+across the whole sky. The hash was fine; the falloff was wrong. A star is a
+point, so the glow now dies well inside its cell.

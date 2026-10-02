@@ -14,6 +14,7 @@ import * as THREE from "three";
 import { AnimationClock, approachAll } from "./easing";
 import type { AudioLevels } from "./audio";
 import { Orb } from "./orb";
+import { Sky } from "./sky";
 import {
   DEFAULT_RATES,
   STATE_TABLE,
@@ -40,6 +41,7 @@ export class GalaxyEngine {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private orbCamera: THREE.PerspectiveCamera;
+  private sky: Sky;
   private orb: Orb;
   private clock = new AnimationClock();
 
@@ -74,6 +76,11 @@ export class GalaxyEngine {
 
     this.orbCamera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
     this.orbCamera.position.set(0, 0, 4.2);
+
+    // Layer order matters and is enforced by renderOrder, not by insertion:
+    // sky first (depth off), then the star network, then the orb on top.
+    this.sky = new Sky();
+    this.scene.add(this.sky.mesh);
 
     this.orb = new Orb(this.performance ? 12 : 24);
     this.scene.add(this.orb.group);
@@ -123,6 +130,8 @@ export class GalaxyEngine {
     this.renderer.setSize(width, height, false);
     this.orbCamera.aspect = width / Math.max(1, height);
     this.orbCamera.updateProjectionMatrix();
+    // The sky needs the pixel dimensions to keep its star grid square.
+    this.sky.resize(width, height);
   }
 
   start(): void {
@@ -140,6 +149,7 @@ export class GalaxyEngine {
 
   dispose(): void {
     this.stop();
+    this.sky.dispose();
     this.orb.dispose();
     this.renderer.dispose();
   }
@@ -171,9 +181,15 @@ export class GalaxyEngine {
   };
 
   private render(elapsed: number): void {
-    // Layer 1 will draw the sky here, before everything else.
-    // Layer 3 will draw the star network here, between sky and orb.
     this.renderer.clear();
+
+    // Pass 1 — the sky. Full-screen quad, depth testing off.
+    this.sky.update(elapsed, this.targets, this.levels.voice);
+
+    // Pass 3 — the star network will be drawn here, between sky and orb.
+
+    // Pass 4 — the orb, on its own camera, over a cleared depth buffer.
+    this.renderer.clearDepth();
 
     this.orb.update({
       elapsed,
