@@ -9,13 +9,13 @@ from __future__ import annotations
 from dataclasses import replace
 
 from ..memory import MemoryStore
-from . import apps, clock, memory, messages, notes, weather
+from . import apps, clock, files, memory, messages, notes, weather
 from .base import Tool, ToolError, ToolRegistry, ToolResult
 
 __all__ = ["Tool", "ToolError", "ToolRegistry", "ToolResult", "build_registry"]
 
 # Modules whose tools need no external state. One line per capability, forever.
-_MODULES = (clock, weather, notes, apps, messages)
+_MODULES = (clock, weather, notes, apps, messages, files)
 
 
 def build_registry(
@@ -47,7 +47,7 @@ def build_registry(
     # Board tools need a provider to reason
     if provider is not None:
         from ..board.tool import build as build_board
-        for tool in build_board():
+        for tool in build_board(provider=provider):
             registry.register(tool)
 
     # Apply the config-level posture last, so it can adjust any tool.

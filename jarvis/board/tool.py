@@ -152,13 +152,15 @@ def convene_board(
     return "\n".join(lines)
 
 
-def _convene_board_tool(question: str) -> str:
-    """The tool function wrapper."""
-    return convene_board(question)
+def build(provider=None) -> list[Tool]:
+    """Assemble the board tool.
 
+    The provider is captured in a closure so the tool function can pass it
+    to convene_board when the model calls it.
+    """
+    def _convene_board_tool(question: str) -> str:
+        return convene_board(question, provider=provider)
 
-def build() -> list[Tool]:
-    """Assemble the board tool."""
     return [
         Tool(
             name="convene_board",
