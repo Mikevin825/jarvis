@@ -16,6 +16,7 @@ import sys
 from .brain import Brain, Chunk, ToolRun
 from .config import ConfigError, load_config, load_dotenv
 from .cost import CostTracker
+from .galaxy_bridge import GalaxyBridge
 from .gate import CliGate, DenyAllGate, NoHumanGate
 from .memory import MemoryStore
 from .personality import load_personality
@@ -482,6 +483,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"cannot start voice: {exc}", file=sys.stderr)
             return 2
 
+        bridge = GalaxyBridge()
         loop = VoiceLoop(
             brain,
             transcriber,
@@ -495,6 +497,7 @@ def main(argv: list[str] | None = None) -> int:
                 min_sentence_chars=cfg.voice.min_sentence_chars,
             ),
             registry=brain.registry,
+            galaxy_bridge=bridge,
         )
         path = Path(args.voice_file)
         if not path.exists():
@@ -521,6 +524,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"cannot start voice: {exc}", file=sys.stderr)
             return 2
 
+        bridge = GalaxyBridge()
         loop = VoiceLoop(
             brain,
             transcriber,
@@ -534,6 +538,7 @@ def main(argv: list[str] | None = None) -> int:
                 min_sentence_chars=cfg.voice.min_sentence_chars,
             ),
             registry=brain.registry,
+            galaxy_bridge=bridge,
         )
         loop.brain.name = name  # so the loop can greet with the right name
         try:

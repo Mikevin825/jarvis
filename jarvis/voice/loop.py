@@ -74,6 +74,7 @@ class VoiceLoop:
         on_state: Callable[[str, str], None] | None = None,
         on_turn: Callable[[str, str], None] | None = None,
         on_tool: Callable[[object], None] | None = None,
+        galaxy_bridge=None,
     ) -> None:
         self.brain = brain
         self.transcriber = transcriber
@@ -92,6 +93,7 @@ class VoiceLoop:
         self._on_state_cb = on_state
         self._on_turn_cb = on_turn
         self._on_tool_cb = on_tool
+        self._galaxy_bridge = galaxy_bridge
 
         self._ready: list[Path] = []
         self._ready_lock = threading.Lock()
@@ -109,6 +111,13 @@ class VoiceLoop:
         The terminal prints; a GUI updates its panel. The loop itself does not
         care which — that is what keeps one voice core serving both.
         """
+        # Write to the galaxy bridge first, so the galaxy always knows the
+        # current state even if no observer is attached.
+        if self._galaxy_bridge is not None:
+            try:
+                self._galaxy_bridge.set_state(state)
+            except Exception:  # noqa: BLE001 - a broken bridge must not stop voice
+                pass
         if self._on_state_cb is not None:
             try:
                 self._on_state_cb(state, detail)

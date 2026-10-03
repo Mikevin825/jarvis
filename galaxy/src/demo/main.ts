@@ -129,9 +129,43 @@ micToggle.addEventListener("click", () => {
   }
 });
 
-// -- audio ----------------------------------------------------------------
+// -- JARVIS connection ----------------------------------------------------
+// Poll JARVIS state files and update the galaxy. The bridge writes
+// state/galaxy-state.json and state/galaxy-audio.json; we read them here.
 
+let jarvisConnected = false;
 let elapsed = 0;
+
+async function pollJarvisState(): Promise<void> {
+  try {
+    const [stateRes, audioRes] = await Promise.all([
+      fetch("/state/galaxy-state.json"),
+      fetch("/state/galaxy-audio.json"),
+    ]);
+    if (!stateRes.ok || !audioRes.ok) return;
+
+    const stateData = await stateRes.json();
+    const audioData = await audioRes.json();
+
+    engine.setState(stateData.state);
+    engine.setLevels({
+      voice: audioData.voice ?? 0,
+      bass: audioData.bass ?? 0,
+      treble: audioData.treble ?? 0,
+    });
+
+    if (!jarvisConnected) {
+      jarvisConnected = true;
+      liveRegion.textContent = "Connected to JARVIS";
+    }
+  } catch {
+    // JARVIS not running or state files not available — stay in demo mode.
+  }
+}
+
+// Poll every 500ms. The bridge writes at most every 500ms, so this is
+// the tightest loop that doesn't waste cycles.
+setInterval(pollJarvisState, 500);
 
 // -- frame loop -----------------------------------------------------------
 
