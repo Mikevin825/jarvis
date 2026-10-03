@@ -245,6 +245,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="open the desktop panel (a window, not a terminal)",
     )
+    parser.add_argument(
+        "--board",
+        action="store_true",
+        help="open the board meetings panel",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -409,6 +414,13 @@ def main(argv: list[str] | None = None) -> int:
         from .desktop.__main__ import main as desktop_main
 
         return desktop_main()
+
+    if args.board:
+        from .desktop.board_panel import BoardPanel
+
+        panel = BoardPanel()
+        panel.run()
+        return 0
 
     # -- list the voices an ElevenLabs key can actually use ------------------
     if args.voices:
