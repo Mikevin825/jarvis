@@ -13,6 +13,7 @@ assistant that cries wolf gets muted, and a muted assistant is useless.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
@@ -194,6 +195,7 @@ _REGISTRY = {
     NoteCountCheck.name: NoteCountCheck,
     MessageWatchCheck.name: MessageWatchCheck,
     "scout": None,  # Registered separately — needs a provider
+    "board-standing-review": None,  # Registered separately — needs a provider
 }
 
 
@@ -215,6 +217,24 @@ def build_checks(config: dict, provider=None) -> list[Check]:
             from .scout_check import ScoutCheck
             interval = float(settings.get("interval_seconds", 3600))
             built.append(ScoutCheck(interval, settings, provider))
+            continue
+        if name == "board-standing-review":
+            # The standing review needs a provider and dossiers — skip if none.
+            if provider is None:
+                continue
+            from ..board.dossier import parse_dossier
+            from ..board.standing import StandingReviewCheck
+            dossiers_dir = Path(__file__).resolve().parent.parent / "board" / "dossiers"
+            dossiers = []
+            if dossiers_dir.exists():
+                for path in sorted(dossiers_dir.glob("*.md")):
+                    dossier = parse_dossier(path)
+                    if dossier is not None:
+                        dossiers.append(dossier)
+            if not dossiers:
+                continue
+            interval = float(settings.get("interval_seconds", 2592000))
+            built.append(StandingReviewCheck(interval, settings, dossiers, provider))
             continue
         factory = _REGISTRY.get(name)
         if factory is None:

@@ -174,6 +174,17 @@ def _parse_seat_response(text: str) -> dict | None:
                 "abstains": False,
             }
 
+        # Last resort: treat the entire prose as the position
+        # This is better than failing the entire seat
+        return {
+            "position": prose[:500],
+            "reasoning": "",
+            "citations": [],
+            "confidence": 3,
+            "would_change_mind": "",
+            "abstains": False,
+        }
+
     return None
 
 
