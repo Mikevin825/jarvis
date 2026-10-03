@@ -47,6 +47,7 @@ def _build_brain(gate=None) -> tuple:
         store,
         extra_gated=cfg.rails.extra_gated_tools,
         ungated=cfg.rails.ungated_tools,
+        provider=build_provider(cfg.brain),
     )
 
     # The gate is attached to the registry, so it covers every consequential

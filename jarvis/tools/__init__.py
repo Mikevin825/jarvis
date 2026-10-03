@@ -22,6 +22,7 @@ def build_registry(
     memory_store: MemoryStore | None = None,
     extra_gated: tuple = (),
     ungated: tuple = (),
+    provider=None,
 ) -> ToolRegistry:
     """Assemble every tool.
 
@@ -31,6 +32,8 @@ def build_registry(
 
     `extra_gated` / `ungated` come from `rails` in config.yaml, so the safety
     posture can be tightened (or deliberately loosened) without a code change.
+
+    `provider` is passed to tools that need a model to reason (e.g. the board).
     """
     registry = ToolRegistry()
     for module in _MODULES:
@@ -39,6 +42,12 @@ def build_registry(
 
     if memory_store is not None:
         for tool in memory.build(memory_store):
+            registry.register(tool)
+
+    # Board tools need a provider to reason
+    if provider is not None:
+        from ..board.tool import build as build_board
+        for tool in build_board():
             registry.register(tool)
 
     # Apply the config-level posture last, so it can adjust any tool.
