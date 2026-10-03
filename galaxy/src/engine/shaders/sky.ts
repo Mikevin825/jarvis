@@ -35,6 +35,7 @@ uniform float uAspect;
 uniform vec3  uPrimary;
 uniform float uBrightness;
 uniform float uBloom;
+uniform float uLightMode;
 
 varying vec2 vUv;
 
@@ -117,30 +118,39 @@ void main() {
   vec2 uv = (vUv - 0.5) * 2.0;
   float radius = length(uv);
 
-  // -- base: near-black navy, darker toward the edges ------------------------
-  vec3 colour = mix(vec3(0.008, 0.014, 0.030), vec3(0.020, 0.030, 0.055), 1.0 - radius);
+  // -- base: near-black navy in dark mode, pale dawn in light mode -----------
+  vec3 darkBase = mix(vec3(0.008, 0.014, 0.030), vec3(0.020, 0.030, 0.055), 1.0 - radius);
+  vec3 lightBase = mix(vec3(0.88, 0.90, 0.94), vec3(0.82, 0.85, 0.90), 1.0 - radius);
+  vec3 colour = mix(darkBase, lightBase, uLightMode);
 
   // -- nebula ----------------------------------------------------------------
+  // In light mode, the nebula becomes soft tints rather than bright wisps.
   vec2 nuv = vec2(uv.x * uAspect, uv.y);
-  colour += nebulaLayer(nuv, vec3(0.05, 0.16, 0.15), 2.1, 0.004, 0.52, 0.0) * uBrightness;
-  colour += nebulaLayer(nuv, vec3(0.11, 0.06, 0.17), 1.7, 0.003, 0.55, 1.7) * uBrightness;
-  colour += nebulaLayer(nuv, vec3(0.04, 0.08, 0.18), 2.6, 0.005, 0.50, 3.1) * uBrightness;
+  float nebulaStrength = mix(1.0, 0.25, uLightMode);
+  colour += nebulaLayer(nuv, vec3(0.05, 0.16, 0.15), 2.1, 0.004, 0.52, 0.0) * uBrightness * nebulaStrength;
+  colour += nebulaLayer(nuv, vec3(0.11, 0.06, 0.17), 1.7, 0.003, 0.55, 1.7) * uBrightness * nebulaStrength;
+  colour += nebulaLayer(nuv, vec3(0.04, 0.08, 0.18), 2.6, 0.005, 0.50, 3.1) * uBrightness * nebulaStrength;
 
   // -- bloom behind the orb --------------------------------------------------
   // A few soft radial falloffs in the orb's colour, with a tiny pale core.
   float core = exp(-radius * 7.0);
   float wide = exp(-radius * 2.1);
-  colour += uPrimary * (core * 0.22 + wide * 0.07) * uBloom;
+  float bloomStrength = mix(1.0, 0.3, uLightMode);
+  colour += uPrimary * (core * 0.22 + wide * 0.07) * uBloom * bloomStrength;
 
   float pinpoint = exp(-radius * 26.0);
-  colour += vec3(0.55, 0.85, 0.95) * pinpoint * 0.10 * uBloom;
+  colour += vec3(0.55, 0.85, 0.95) * pinpoint * 0.10 * uBloom * bloomStrength;
 
   // -- stars -----------------------------------------------------------------
-  colour += starLayer(uv, 90.0, 0.9, 1.1, 11.0) * 0.75 * uBrightness;
-  colour += starLayer(uv, 26.0, 1.6, 0.6, 47.0) * 0.55 * uBrightness;
+  // No stars in light mode — they would read as noise on a pale background.
+  float starStrength = mix(1.0, 0.0, uLightMode);
+  colour += starLayer(uv, 90.0, 0.9, 1.1, 11.0) * 0.75 * uBrightness * starStrength;
+  colour += starLayer(uv, 26.0, 1.6, 0.6, 47.0) * 0.55 * uBrightness * starStrength;
 
   // -- vignette --------------------------------------------------------------
-  colour *= 1.0 - smoothstep(0.75, 1.65, radius) * 0.75;
+  // In light mode, the vignette is much subtler.
+  float vignetteStrength = mix(0.75, 0.15, uLightMode);
+  colour *= 1.0 - smoothstep(0.75, 1.65, radius) * vignetteStrength;
 
   gl_FragColor = vec4(colour, 1.0);
 }

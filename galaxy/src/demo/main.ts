@@ -97,12 +97,22 @@ motionToggle.addEventListener("click", () => {
   motionToggle.setAttribute("aria-pressed", String(reducedMotion));
 });
 
-let theme = "dark";
+// Theme: default to OS preference, remember the choice.
+const storedTheme = localStorage.getItem("galaxy-theme");
+const osPrefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+let theme = storedTheme || (osPrefersLight ? "light" : "dark");
+document.documentElement.dataset.theme = theme;
+themeToggle.textContent = theme === "dark" ? "🌙" : "☀️";
+themeToggle.setAttribute("aria-pressed", String(theme === "light"));
+themeToggle.setAttribute("aria-label", `Theme: ${theme}`);
 themeToggle.addEventListener("click", () => {
   theme = theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = theme;
-  themeToggle.textContent = `theme: ${theme}`;
+  localStorage.setItem("galaxy-theme", theme);
+  themeToggle.textContent = theme === "dark" ? "🌙" : "☀️";
   themeToggle.setAttribute("aria-pressed", String(theme === "light"));
+  themeToggle.setAttribute("aria-label", `Theme: ${theme}`);
+  engine.setLightMode(theme === "light" ? 1 : 0);
 });
 
 let micEnabled = true;

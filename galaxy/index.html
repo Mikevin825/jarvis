@@ -28,9 +28,11 @@
         <button class="toggle" id="mic-toggle" type="button">mic: on</button>
         <button class="toggle" id="perf-toggle" type="button">performance: auto</button>
         <button class="toggle" id="motion-toggle" type="button">reduced motion: off</button>
-        <button class="toggle" id="theme-toggle" type="button">theme: dark</button>
       </div>
     </div>
+
+    <!-- Theme toggle in a corner, per the spec: a two-option control with icons -->
+    <button class="theme-corner" id="theme-toggle" type="button" aria-label="Theme: dark">🌙</button>
 
     <!-- Screen readers get told the state, since the orb cannot say it. -->
     <div class="sr-only" role="status" aria-live="polite" id="live-region">

@@ -85,20 +85,24 @@ export class GalaxyEngine {
     this.sky = new Sky();
     this.scene.add(this.sky.mesh);
 
-    const layout = generateNetwork({ seed: 1337, starCount: this.performance ? 120 : 220 });
+    const layout = generateNetwork({
+      seed: 1337,
+      strayCount: this.performance ? 60 : 100,
+      dustCount: this.performance ? 150 : 300,
+    });
     this.network = new StarNetwork(layout, this.performance ? 1 : 2);
     this.scene.add(this.network.group);
 
     this.orb = new Orb(this.performance ? 12 : 24);
     this.scene.add(this.orb.group);
 
-    // All three groups share one camera. Layers control draw order via
-    // renderOrder: sky (renderOrder -1000) → network (-500) → orb (0).
-    // A single render pass is cheaper than three and avoids redundant
-    // full-scene work.
+    // Each group has its own camera. The network camera is 60° FOV at 42 units
+    // back; the orb camera is 45° FOV at 4.2 units. Layers control what each
+    // camera sees: sky (0), network (1), orb (2).
     this.orbCamera.layers.enable(0);
-    this.orbCamera.layers.enable(1);
     this.orbCamera.layers.enable(2);
+    this.network.getCamera().layers.enable(0);
+    this.network.getCamera().layers.enable(1);
 
     this.targets = { ...STATE_TABLE.idle };
     this.resize();
@@ -122,6 +126,10 @@ export class GalaxyEngine {
 
   setReducedMotion(enabled: boolean): void {
     this.reducedMotion = enabled;
+  }
+
+  setLightMode(enabled: number): void {
+    this.targets.lightMode = enabled;
   }
 
   /** Force performance mode on or off, or hand control back to the auto rule. */
@@ -199,8 +207,8 @@ export class GalaxyEngine {
   private render(elapsed: number): void {
     this.renderer.clear();
 
-    // Update all three groups, then render once. Draw order is controlled by
-    // renderOrder: sky (-1000) → network (-500) → orb (0).
+    // Update all three groups. Draw order is controlled by renderOrder:
+    // sky (-1000) → network (-500) → orb (0).
     this.sky.update(elapsed, this.targets, this.levels.voice);
     this.network.update(elapsed, this.targets);
     this.orb.update({
@@ -211,6 +219,18 @@ export class GalaxyEngine {
       showRings: this.state === "thinking" || this.targets.ringOpacity > 0.01,
     });
 
+    // Render the network with its own camera (60° FOV, 42 units back).
+    // Camera shake: almost imperceptible, only during speaking/thinking.
+    const cam = this.network.getCamera();
+    if (this.state === "speaking" || this.state === "thinking") {
+      const shake = 0.02;
+      cam.position.x += Math.sin(elapsed * 13.7) * shake;
+      cam.position.y += Math.cos(elapsed * 11.3) * shake;
+    }
+    this.renderer.render(this.scene, cam);
+
+    // Clear depth and render the orb on top with its own camera.
+    this.renderer.clearDepth();
     this.renderer.render(this.scene, this.orbCamera);
   }
 

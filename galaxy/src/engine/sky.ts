@@ -31,6 +31,7 @@ export class Sky {
         uPrimary: { value: new THREE.Color(0x2a6b6b) },
         uBrightness: { value: 0.55 },
         uBloom: { value: 0.5 },
+        uLightMode: { value: 0 },
       },
       depthTest: false,
       depthWrite: false,
@@ -61,6 +62,7 @@ export class Sky {
     const u = this.material.uniforms;
     u.uTime.value = elapsed;
     u.uBrightness.value = targets.skyBrightness;
+    u.uLightMode.value = targets.lightMode ? 1 : 0;
     // The bloom breathes with the voice, so the sky answers the AI too.
     u.uBloom.value = 0.45 + targets.skyBrightness * 0.4 + voiceLevel * 0.5;
     (u.uPrimary.value as THREE.Color).setRGB(

@@ -87,6 +87,8 @@ export interface VisualTargets {
   nodeSize: number;
   skyBrightness: number;
   cameraPush: number;
+  /** Whether light mode is active (0 = dark, 1 = light). Drives blending and colour changes. */
+  lightMode: number;
 }
 
 /** Build a full target record from a compact description. */
@@ -106,6 +108,7 @@ function targets(spec: {
   nodeSize: number;
   skyBrightness: number;
   cameraPush: number;
+  lightMode: number;
 }): VisualTargets {
   const p = hexToRgb(spec.primary);
   const s = hexToRgb(spec.secondary);
@@ -129,6 +132,7 @@ function targets(spec: {
     nodeSize: spec.nodeSize,
     skyBrightness: spec.skyBrightness,
     cameraPush: spec.cameraPush,
+    lightMode: spec.lightMode,
   };
 }
 
@@ -154,6 +158,7 @@ export const STATE_TABLE: Record<AiState, VisualTargets> = {
     nodeSize: 1.0,
     skyBrightness: 0.55,
     cameraPush: 0.0,
+    lightMode: 0,
   }),
 
   // Mic requested, no audio yet. A dim ember: clearly waiting, not listening.
@@ -173,6 +178,7 @@ export const STATE_TABLE: Record<AiState, VisualTargets> = {
     nodeSize: 1.0,
     skyBrightness: 0.6,
     cameraPush: 0.0,
+    lightMode: 0,
   }),
 
   // Recording. Bright gold — the one warm thing in a cool universe.
@@ -192,6 +198,7 @@ export const STATE_TABLE: Record<AiState, VisualTargets> = {
     nodeSize: 1.0,
     skyBrightness: 0.7,
     cameraPush: 0.0,
+    lightMode: 0,
   }),
 
   // Processing. Colour flows, rings appear, the galaxy leans in.
@@ -211,6 +218,7 @@ export const STATE_TABLE: Record<AiState, VisualTargets> = {
     nodeSize: 1.25,
     skyBrightness: 0.85,
     cameraPush: 0.35,
+    lightMode: 0,
   }),
 
   // Replying. Driven by playback audio; the galaxy answers the AI's own voice.
@@ -230,6 +238,7 @@ export const STATE_TABLE: Record<AiState, VisualTargets> = {
     nodeSize: 1.3,
     skyBrightness: 0.95,
     cameraPush: 0.3,
+    lightMode: 0,
   }),
 
   // Something broke. Red, still, sharp. No motion to distract from the message.
@@ -249,6 +258,7 @@ export const STATE_TABLE: Record<AiState, VisualTargets> = {
     nodeSize: 1.0,
     skyBrightness: 0.5,
     cameraPush: 0.0,
+    lightMode: 0,
   }),
 };
 
@@ -275,6 +285,7 @@ export const DEFAULT_RATES: Record<keyof VisualTargets, number> = {
   nodeSize: 0.1,
   skyBrightness: 0.08,
   cameraPush: 0.06,
+  lightMode: 0.1,
 };
 
 /** Normalise an arbitrary string to a known state, defaulting to idle. */

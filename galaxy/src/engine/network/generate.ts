@@ -1,30 +1,40 @@
 /**
  * Star network generation.
  *
- * Pure maths, no three.js. Given a seed and a count, produce:
+ * Pure maths, no three.js. Given a seed, produce:
  *
- *   - cluster centres, scattered in a rough disc
- *   - stars, scattered around those centres with a Gaussian falloff
- *   - links, connecting each star to its nearest neighbours within a max distance
+ *   - 8 cluster centres on a shell 13–25 units from the middle
+ *   - 6–8 nodes per cluster, spread within a few units of the centre
+ *   - ~100 stray nodes in muted blue-grey
+ *   - dust: a few hundred tiny faint points on a much larger shell
+ *   - links, connecting nodes closer than ~10 units
+ *   - per-cluster hues from a cool palette
  *
  * The layout is deterministic for a given seed, so it can be tested and so
  * restarts don't reshuffle the galaxy.
  */
 
 export interface NetworkLayout {
-  /** xyz per star. */
+  /** xyz per node (clusters + strays). */
   positions: Float32Array;
-  /** Per-star size multiplier, 0.5..1.5. */
+  /** Per-node size multiplier, 0.5..1.5. */
   sizes: Float32Array;
-  /** Per-star phase offset for twinkling. */
+  /** Per-node phase offset for twinkling. */
   phases: Float32Array;
-  /** Pairs of star indices, one link per pair. */
+  /** Per-node colour index (0-7 for clusters, 8 for strays, 9 for dust). */
+  colourIndices: Uint8Array;
+  /** Pairs of node indices, one link per pair. */
   links: Uint32Array;
-  /** xyz per cluster centre (for the dust field). */
+  /** xyz per cluster centre. */
   clusterCentres: Float32Array;
-  starCount: number;
+  /** Per-cluster hue as RGB 0..1. */
+  clusterColours: Float32Array;
+  /** xyz per dust particle. */
+  dustPositions: Float32Array;
+  nodeCount: number;
   linkCount: number;
   clusterCount: number;
+  dustCount: number;
 }
 
 /** Mulberry32 — small, fast, deterministic. */
@@ -48,113 +58,141 @@ function gaussian(rand: () => number): number {
 
 export interface GenerateOptions {
   seed?: number;
-  starCount?: number;
   clusterCount?: number;
+  nodesPerCluster?: number;
+  strayCount?: number;
+  dustCount?: number;
   /** Max link distance in world units. */
   linkDistance?: number;
-  /** How many nearest neighbours to try linking to. */
-  maxLinksPerStar?: number;
-  /** Radius of the disc the clusters sit in. */
-  discRadius?: number;
+  /** Inner radius of the cluster shell. */
+  shellInner?: number;
+  /** Outer radius of the cluster shell. */
+  shellOuter?: number;
 }
+
+/** The cool palette: teal, cyan, blue, purple, green-teal, indigo, blue-teal, violet. */
+const CLUSTER_PALETTE: [number, number, number][] = [
+  [0.16, 0.42, 0.42],   // teal
+  [0.18, 0.78, 0.78],   // cyan
+  [0.20, 0.45, 0.85],   // blue
+  [0.55, 0.35, 0.85],   // purple
+  [0.20, 0.65, 0.45],   // green-teal
+  [0.35, 0.30, 0.75],   // indigo
+  [0.25, 0.55, 0.75],   // blue-teal
+  [0.60, 0.35, 0.80],   // violet
+];
 
 /**
  * Generate a star network layout.
  *
- * Clusters are placed on a rough disc with some vertical jitter. Stars scatter
- * around each centre with a Gaussian falloff, so the network reads as distinct
- * clumps rather than a uniform field.
+ * Clusters are placed on a shell 13–25 units out. Each cluster has its own
+ * hue from the cool palette. Strays fill the rest in muted blue-grey. Dust
+ * is a few hundred tiny points on a much larger shell.
  */
 export function generateNetwork(options: GenerateOptions = {}): NetworkLayout {
   const {
     seed = 1337,
-    starCount = 220,
-    clusterCount = 7,
-    linkDistance = 2.8,
-    maxLinksPerStar = 3,
-    discRadius = 6,
+    clusterCount = 8,
+    nodesPerCluster = 7,
+    strayCount = 100,
+    dustCount = 300,
+    linkDistance = 10,
+    shellInner = 13,
+    shellOuter = 25,
   } = options;
 
   const rand = mulberry32(seed);
 
   // -- cluster centres ----------------------------------------------------
-  // Placed on a disc with vertical jitter, so the network has a plane but
-  // isn't perfectly flat.
+  // Placed on a shell 13–25 units out, with some vertical jitter.
   const clusterCentres = new Float32Array(clusterCount * 3);
   for (let c = 0; c < clusterCount; c++) {
-    const angle = rand() * Math.PI * 2;
-    const radius = discRadius * (0.25 + rand() * 0.75);
+    const angle = (c / clusterCount) * Math.PI * 2 + rand() * 0.5;
+    const radius = shellInner + rand() * (shellOuter - shellInner);
     clusterCentres[c * 3 + 0] = Math.cos(angle) * radius;
-    clusterCentres[c * 3 + 1] = gaussian(rand) * 0.8;
+    clusterCentres[c * 3 + 1] = gaussian(rand) * 2.5;
     clusterCentres[c * 3 + 2] = Math.sin(angle) * radius;
   }
 
-  // -- stars --------------------------------------------------------------
-  const positions = new Float32Array(starCount * 3);
-  const sizes = new Float32Array(starCount);
-  const phases = new Float32Array(starCount);
+  // -- cluster colours ----------------------------------------------------
+  const clusterColours = new Float32Array(clusterCount * 3);
+  for (let c = 0; c < clusterCount; c++) {
+    const [r, g, b] = CLUSTER_PALETTE[c % CLUSTER_PALETTE.length];
+    clusterColours[c * 3 + 0] = r;
+    clusterColours[c * 3 + 1] = g;
+    clusterColours[c * 3 + 2] = b;
+  }
 
-  for (let i = 0; i < starCount; i++) {
-    // Pick a cluster, weighted toward the centre so the middle is denser.
-    const c = Math.floor(Math.pow(rand(), 0.7) * clusterCount) % clusterCount;
+  // -- nodes (clusters + strays) ------------------------------------------
+  const totalNodes = clusterCount * nodesPerCluster + strayCount;
+  const positions = new Float32Array(totalNodes * 3);
+  const sizes = new Float32Array(totalNodes);
+  const phases = new Float32Array(totalNodes);
+  const colourIndices = new Uint8Array(totalNodes);
+
+  let nodeIndex = 0;
+
+  // Cluster nodes
+  for (let c = 0; c < clusterCount; c++) {
     const cx = clusterCentres[c * 3 + 0];
     const cy = clusterCentres[c * 3 + 1];
     const cz = clusterCentres[c * 3 + 2];
 
-    // Gaussian scatter around the centre. The spread varies per cluster so
-    // some are tight and some are loose.
-    const spread = 0.9 + rand() * 1.4;
-    positions[i * 3 + 0] = cx + gaussian(rand) * spread;
-    positions[i * 3 + 1] = cy + gaussian(rand) * spread * 0.6;
-    positions[i * 3 + 2] = cz + gaussian(rand) * spread;
+    for (let n = 0; n < nodesPerCluster; n++) {
+      const spread = 1.5 + rand() * 2.0;
+      positions[nodeIndex * 3 + 0] = cx + gaussian(rand) * spread;
+      positions[nodeIndex * 3 + 1] = cy + gaussian(rand) * spread * 0.6;
+      positions[nodeIndex * 3 + 2] = cz + gaussian(rand) * spread;
+      sizes[nodeIndex] = 0.6 + rand() * 0.9;
+      phases[nodeIndex] = rand();
+      colourIndices[nodeIndex] = c;
+      nodeIndex++;
+    }
+  }
 
-    sizes[i] = 0.5 + rand();
-    phases[i] = rand();
+  // Stray nodes — scattered in a larger volume, muted blue-grey
+  for (let i = 0; i < strayCount; i++) {
+    const angle = rand() * Math.PI * 2;
+    const radius = 5 + rand() * 30;
+    positions[nodeIndex * 3 + 0] = Math.cos(angle) * radius;
+    positions[nodeIndex * 3 + 1] = gaussian(rand) * 4;
+    positions[nodeIndex * 3 + 2] = Math.sin(angle) * radius;
+    sizes[nodeIndex] = 0.4 + rand() * 0.6;
+    phases[nodeIndex] = rand();
+    colourIndices[nodeIndex] = 8; // stray colour index
+    nodeIndex++;
+  }
+
+  // -- dust ---------------------------------------------------------------
+  // A few hundred tiny faint points on a much larger shell.
+  const dustPositions = new Float32Array(dustCount * 3);
+  for (let i = 0; i < dustCount; i++) {
+    const angle = rand() * Math.PI * 2;
+    const radius = 30 + rand() * 40;
+    dustPositions[i * 3 + 0] = Math.cos(angle) * radius;
+    dustPositions[i * 3 + 1] = gaussian(rand) * 8;
+    dustPositions[i * 3 + 2] = Math.sin(angle) * radius;
   }
 
   // -- links --------------------------------------------------------------
-  // For each star, find the nearest neighbours within linkDistance and connect.
-  // O(n²) but done once at init, and n is small.
-  //
-  // Track how many links each star already has so the per-star limit holds in
-  // both directions: a star must not be the target of more links than the limit
-  // just because many other stars want to connect to it.
+  // Connect any two nodes closer than linkDistance. O(n²) but done once.
   const linkList: number[] = [];
   const linkDistSq = linkDistance * linkDistance;
-  const linkCounts = new Uint8Array(starCount);
 
-  for (let i = 0; i < starCount; i++) {
-    if (linkCounts[i] >= maxLinksPerStar) continue;
-
+  for (let i = 0; i < totalNodes; i++) {
     const ix = i * 3;
     const ixx = positions[ix];
     const ixy = positions[ix + 1];
     const ixz = positions[ix + 2];
 
-    // Collect candidates with their distances.
-    const candidates: { index: number; distSq: number }[] = [];
-    for (let j = 0; j < starCount; j++) {
-      if (j === i) continue;
-      if (linkCounts[j] >= maxLinksPerStar) continue;
+    for (let j = i + 1; j < totalNodes; j++) {
       const jx = j * 3;
       const dx = positions[jx] - ixx;
       const dy = positions[jx + 1] - ixy;
       const dz = positions[jx + 2] - ixz;
       const distSq = dx * dx + dy * dy + dz * dz;
       if (distSq < linkDistSq) {
-        candidates.push({ index: j, distSq });
-      }
-    }
-
-    // Sort by distance, take the nearest few.
-    candidates.sort((a, b) => a.distSq - b.distSq);
-    const limit = Math.min(maxLinksPerStar - linkCounts[i], candidates.length);
-    for (let k = 0; k < limit; k++) {
-      // Only add each link once: i < j.
-      if (candidates[k].index > i) {
-        linkList.push(i, candidates[k].index);
-        linkCounts[i]++;
-        linkCounts[candidates[k].index]++;
+        linkList.push(i, j);
       }
     }
   }
@@ -163,10 +201,14 @@ export function generateNetwork(options: GenerateOptions = {}): NetworkLayout {
     positions,
     sizes,
     phases,
+    colourIndices,
     links: new Uint32Array(linkList),
     clusterCentres,
-    starCount,
+    clusterColours,
+    dustPositions,
+    nodeCount: totalNodes,
     linkCount: linkList.length / 2,
     clusterCount,
+    dustCount,
   };
 }
