@@ -210,14 +210,24 @@ class StandingReviewCheck:
         self.settings = settings
         self.dossiers = dossiers
         self.provider = provider
+        self._last_run: datetime | None = None
 
     def run(self, ctx) -> "CheckResult":
         """Run the standing review.
 
         Returns a CheckResult with surfaced=True if the review ran and
         produced something worth surfacing.
+
+        Checks the last run time first — if a standing review already ran
+        within the interval, skip it. This prevents the double-run bug.
         """
         from ..heartbeat.checks import CheckResult
+
+        # Check if we already ran a standing review recently
+        if self._last_run is not None:
+            from datetime import timedelta
+            if ctx.now - self._last_run < timedelta(seconds=self.interval_seconds):
+                return CheckResult(summary="standing review already ran this interval")
 
         business_brief = self.settings.get("business_brief", "")
         max_cost_usd = float(self.settings.get("max_cost_usd", 0.50))
@@ -228,6 +238,9 @@ class StandingReviewCheck:
             business_brief=business_brief,
             max_cost_usd=max_cost_usd,
         )
+
+        # Record that we ran
+        self._last_run = ctx.now
 
         if not result.synthesis:
             return CheckResult(summary="standing review produced nothing")

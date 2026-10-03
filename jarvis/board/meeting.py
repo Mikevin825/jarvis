@@ -120,6 +120,9 @@ def _parse_seat_response(text: str) -> dict | None:
 
     Returns None if the response can't be parsed. A truncated response
     usually contains the first part of the JSON — try to extract what we can.
+
+    If the model returns prose instead of JSON, try to extract the position
+    and reasoning from the prose. This is better than failing the entire seat.
     """
     if not text:
         return None
@@ -128,23 +131,50 @@ def _parse_seat_response(text: str) -> dict | None:
     json_start = text.find("{")
     json_end = text.rfind("}") + 1
 
-    if json_start < 0 or json_end <= json_start:
-        return None
+    if json_start >= 0 and json_end > json_start:
+        try:
+            return json.loads(text[json_start:json_end])
+        except json.JSONDecodeError:
+            # Try to fix common truncation issues
+            truncated = text[json_start:]
+            open_count = truncated.count("{") - truncated.count("}")
+            if open_count > 0:
+                try:
+                    return json.loads(truncated + "}" * open_count)
+                except json.JSONDecodeError:
+                    pass
 
-    try:
-        return json.loads(text[json_start:json_end])
-    except json.JSONDecodeError:
-        # Try to fix common truncation issues
-        # If the JSON is truncated, try to close it
-        truncated = text[json_start:]
-        # Count open braces
-        open_count = truncated.count("{") - truncated.count("}")
-        if open_count > 0:
-            try:
-                return json.loads(truncated + "}" * open_count)
-            except json.JSONDecodeError:
-                pass
-        return None
+    # If no JSON found, try to extract position and reasoning from prose
+    # This is a fallback — the model didn't follow the schema, but we can
+    # still extract something useful
+    prose = text.strip()
+    if len(prose) > 20:
+        # Try to find position and reasoning in the prose
+        position = ""
+        reasoning = ""
+
+        # Look for common patterns
+        if "position:" in prose.lower():
+            parts = prose.lower().split("position:", 1)
+            if len(parts) > 1:
+                position = parts[1].split("\n")[0].strip()
+        if "reasoning:" in prose.lower():
+            parts = prose.lower().split("reasoning:", 1)
+            if len(parts) > 1:
+                reasoning = parts[1].split("\n")[0].strip()
+
+        # If we found something, return it as a partial response
+        if position or reasoning:
+            return {
+                "position": position or prose[:200],
+                "reasoning": reasoning or "",
+                "citations": [],
+                "confidence": 3,
+                "would_change_mind": "",
+                "abstains": False,
+            }
+
+    return None
 
 
 def _coerce_seat_output(data: dict) -> dict:
