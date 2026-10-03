@@ -138,21 +138,26 @@ let elapsed = 0;
 
 async function pollJarvisState(): Promise<void> {
   try {
-    const [stateRes, audioRes] = await Promise.all([
-      fetch("/state/galaxy-state.json"),
-      fetch("/state/galaxy-audio.json"),
-    ]);
-    if (!stateRes.ok || !audioRes.ok) return;
+    const stateRes = await fetch("/state/galaxy-state.json");
+    if (!stateRes.ok) return;
 
     const stateData = await stateRes.json();
-    const audioData = await audioRes.json();
-
     engine.setState(stateData.state);
-    engine.setLevels({
-      voice: audioData.voice ?? 0,
-      bass: audioData.bass ?? 0,
-      treble: audioData.treble ?? 0,
-    });
+
+    // Audio is optional — if the file doesn't exist, use zeros.
+    try {
+      const audioRes = await fetch("/state/galaxy-audio.json");
+      if (audioRes.ok) {
+        const audioData = await audioRes.json();
+        engine.setLevels({
+          voice: audioData.voice ?? 0,
+          bass: audioData.bass ?? 0,
+          treble: audioData.treble ?? 0,
+        });
+      }
+    } catch {
+      // Audio file missing — use synthetic levels from the demo.
+    }
 
     if (!jarvisConnected) {
       jarvisConnected = true;
