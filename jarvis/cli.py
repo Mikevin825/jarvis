@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from .brain import Brain, Chunk, ToolRun
 from .config import ConfigError, load_config, load_dotenv
@@ -28,8 +29,9 @@ from .paths import (
     PAUSE_FILE,
     SCHEDULE_FILE,
 )
-from .prompts import build_system_prompt
+from .prompts import build_self_knowledge, build_system_prompt
 from .providers import ProviderError, build_provider
+from .session import SessionStore
 from .tools import build_registry
 
 EXIT_WORDS = {"/quit", "/exit", "/q"}
@@ -56,19 +58,57 @@ def _build_brain(gate=None) -> tuple:
 
     personality = load_personality()
 
+    # Load core knowledge (curated, always-loaded facts)
+    core_knowledge_path = Path(__file__).resolve().parent.parent / "state" / "core-knowledge.md"
+    core_knowledge = ""
+    if core_knowledge_path.exists():
+        try:
+            core_knowledge = core_knowledge_path.read_text(encoding="utf-8")
+        except OSError:
+            core_knowledge = ""
+
+    tool_names = registry.names()
+
+    def _build_prompt(facts: str = "", turn_count: int = 0) -> str:
+        sp = build_system_prompt(
+            cfg.assistant, facts, personality=personality,
+            core_knowledge=core_knowledge,
+            self_knowledge=build_self_knowledge(tool_names),
+            turn_count=turn_count,
+        )
+        return sp.stable
+
+    def _build_dynamic(turn_count: int = 0) -> str:
+        sp = build_system_prompt(
+            cfg.assistant, personality=personality,
+            core_knowledge=core_knowledge,
+            self_knowledge=build_self_knowledge(tool_names),
+            turn_count=turn_count,
+        )
+        return sp.dynamic
+
     brain = Brain(
         provider,
-        build_system_prompt(cfg.assistant, personality=personality),
+        _build_prompt(turn_count=0),
         registry,
         memory_selector=lambda turn: store.render(store.relevant(turn)),
-        prompt_builder=lambda facts: build_system_prompt(
-            cfg.assistant, facts, personality=personality
-        ),
+        prompt_builder=_build_prompt,
         # Re-read every turn, so editing personality.md takes effect on the very
         # next reply without a restart.
         voice_cue=lambda: load_personality().voice_cue(),
+        # The bridge to the galaxy. Writes state and agent events to disk, so
+        # the constellation lights up the right sub-agent when a tool runs.
+        galaxy=GalaxyBridge(),
     )
-    return cfg, brain, store
+    brain.set_dynamic_block(_build_dynamic(turn_count=0))
+
+    # Session persistence — recover last session on startup
+    session_store = SessionStore(Path("state/session.json"))
+    recovered = session_store.load()
+    if recovered:
+        brain.history.extend(recovered)
+
+    return cfg, brain, store, session_store, provider
 
 
 def _fmt_args(args: dict) -> str:
@@ -154,7 +194,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--voice",
         action="store_true",
-        help="start the push-to-talk voice interface instead of typing",
+        help="start the push-to-talk voice interface (this is the default)",
+    )
+    parser.add_argument(
+        "--text",
+        action="store_true",
+        help="start the typed text interface instead of voice",
     )
     parser.add_argument(
         "--say",
@@ -178,6 +223,11 @@ def main(argv: list[str] | None = None) -> int:
         "--voices",
         action="store_true",
         help="list the ElevenLabs voices your key can use, then exit",
+    )
+    parser.add_argument(
+        "--status-report",
+        action="store_true",
+        help="read the configured website and YouTube channel, print a status report, exit",
     )
     parser.add_argument(
         "--memory",
@@ -266,7 +316,7 @@ def main(argv: list[str] | None = None) -> int:
             # Non-interactive without --yes: nobody is present to approve, so
             # consequential actions are refused rather than assumed.
             gate = NoHumanGate()
-        cfg, brain, store = _build_brain(gate=gate)
+        cfg, brain, store, session_store, provider = _build_brain(gate=gate)
     except ConfigError as exc:
         print(f"configuration problem: {exc}", file=sys.stderr)
         return 2
@@ -422,6 +472,25 @@ def main(argv: list[str] | None = None) -> int:
         panel.run()
         return 0
 
+    # -- status report on the business's online presence ---------------------
+    if args.status_report:
+        from .presence import generate_status_report
+
+        if not cfg.presence.website_url and not cfg.presence.youtube_channel:
+            print(
+                "Nothing is configured to report on.\n"
+                "Add `presence.website_url` and/or `presence.youtube_channel` "
+                "to config.yaml."
+            )
+            return 2
+        print(
+            generate_status_report(
+                website_url=cfg.presence.website_url,
+                channel=cfg.presence.youtube_channel,
+            )
+        )
+        return 0
+
     # -- list the voices an ElevenLabs key can actually use ------------------
     if args.voices:
         from .voice import SpeechError
@@ -519,8 +588,10 @@ def main(argv: list[str] | None = None) -> int:
         loop.handle_recording(path, consume=False)  # keep the fixture
         return 0
 
-    # -- the voice interface -------------------------------------------------
-    if args.voice:
+    # -- the voice interface (default unless --text is given) -----------------
+    # Voice is the default input mode. --text opts into the typed interface.
+    # -m messages and piped stdin still work as non-interactive input.
+    if not args.text and not args.message and sys.stdin.isatty():
         from .voice import (
             CaptureError,
             SpeechError,
@@ -601,7 +672,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{name} is awake. Provider: {cfg.brain.provider} ({cfg.brain.model}).")
     print(f"{len(brain.registry.names())} tools available (see --tools).")
 
-    # -- the heartbeat ------------------------------------------------------
+    # -- voice verification ---------------------------------------------------
     heartbeat = None
     if cfg.heartbeat.enabled and not args.no_heartbeat:
         if PAUSE_FILE.exists():
@@ -661,6 +732,21 @@ def main(argv: list[str] | None = None) -> int:
         if not text:
             continue
         if text.lower() in EXIT_WORDS:
+            # Run automatic memory extractor before exiting
+            try:
+                from .memory.extractor import extract_memories
+                transcript = [
+                    {"role": m.role, "content": m.content or ""}
+                    for m in brain.history
+                    if m.content
+                ]
+                memories = extract_memories(transcript, store, provider, max_memories=5)
+                for mem in memories:
+                    store.add(mem.fact, type=mem.type, hook=mem.hook)
+                if memories:
+                    print(f"(Saved {len(memories)} memories)")
+            except Exception:
+                pass  # Extractor must never block exit
             break
         if text == "/reset":
             brain.reset()
@@ -679,6 +765,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
 
         _run_turn(brain, name, text, tracker=tracker)
+        session_store.save(brain.history)
 
     if heartbeat is not None:
         heartbeat.stop()

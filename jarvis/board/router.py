@@ -126,18 +126,19 @@ def _is_decline_question(question: str) -> tuple[bool, str]:
 # that might appear in questions. This makes routing more flexible — "grow"
 # matches "marketing", "creative" matches "creativity", etc.
 DOMAIN_KEYWORDS: dict[str, list[str]] = {
-    "marketing": ["marketing", "grow", "growth", "client", "customer", "sale", "sell", "price", "pricing", "lead", "funnel", "market", "audience", "reach"],
-    "agency-growth": ["agency", "grow", "growth", "scale", "revenue", "profit", "business", "company"],
-    "positioning": ["position", "positioning", "differentiate", "differentiation", "stand out", "unique", "category"],
-    "creativity": ["creative", "creativity", "design", "pitch", "idea", "concept", "art", "visual", "copy", "write", "writing", "story", "stories"],
-    "design": ["design", "layout", "visual", "ui", "ux", "user experience", "interface", "aesthetic"],
-    "client-work": ["client", "customer", "brief", "project", "deliver", "deadline", "scope", "feedback", "revision"],
-    "branding": ["brand", "branding", "logo", "identity", "message", "messaging", "voice", "tone"],
-    "strategy": ["strategy", "strategic", "plan", "planning", "decision", "choice", "direction", "focus", "product", "cut", "stop", "keep"],
-    "agency-branding": ["agency", "brand", "branding", "position", "positioning", "differentiate", "differentiation"],
-    "operations": ["operation", "operations", "manage", "management", "process", "workflow", "system", "tool"],
-    "project-management": ["project", "deadline", "deliver", "scope", "timeline", "milestone", "task", "sprint"],
-    "culture": ["culture", "team", "hire", "hiring", "fire", "firing", "meeting", "communication", "remote", "office", "work-life", "balance"],
+    "marketing": ["marketing", "market", "brand", "branding", "grow", "growth", "client", "customer", "sale", "sell", "price", "pricing", "lead", "funnel", "audience", "reach", "position", "positioning", "differentiate", "differentiation", "stand out", "unique", "category", "message", "messaging", "voice", "tone"],
+    "agency-growth": ["agency", "grow", "growth", "scale", "revenue", "profit", "business", "company", "strategy", "strategic", "plan", "planning", "decision", "choice", "direction", "focus", "issue", "problem", "solution", "present", "wrong", "right", "should", "could", "would", "improve", "fix", "change", "need", "build", "ship", "experiment", "test", "feature", "deliver", "deadline", "scope", "feedback", "revision", "creative", "design", "pitch", "idea", "concept", "art", "visual", "copy", "write", "writing", "story", "stories", "team", "hire", "process", "operation", "culture", "meeting", "communication", "remote", "office", "work-life", "balance", "project", "product", "user", "manage", "management", "workflow", "system", "tool", "timeline", "milestone", "task", "sprint", "cut", "stop", "keep"],
+    "positioning": ["position", "positioning", "differentiate", "differentiation", "stand out", "unique", "category", "brand", "branding", "agency", "marketing", "market", "grow", "growth", "client", "customer", "sale", "sell", "price", "pricing", "lead", "funnel", "audience", "reach", "message", "messaging", "voice", "tone"],
+    "creativity": ["creative", "creativity", "design", "pitch", "idea", "concept", "art", "visual", "copy", "write", "writing", "story", "stories", "brand", "branding", "message", "messaging", "voice", "tone", "layout", "ui", "ux", "user experience", "interface", "aesthetic"],
+    "design": ["design", "layout", "visual", "ui", "ux", "user experience", "interface", "aesthetic", "creative", "creativity", "pitch", "idea", "concept", "art", "copy", "write", "writing", "story", "stories", "brand", "branding", "message", "messaging", "voice", "tone"],
+    "client-work": ["client", "customer", "brief", "project", "deliver", "deadline", "scope", "feedback", "revision", "creative", "creativity", "design", "pitch", "idea", "concept", "art", "visual", "copy", "write", "writing", "story", "stories", "brand", "branding", "message", "messaging", "voice", "tone", "layout", "ui", "ux", "user experience", "interface", "aesthetic"],
+    "branding": ["brand", "branding", "logo", "identity", "message", "messaging", "voice", "tone", "position", "positioning", "differentiate", "differentiation", "stand out", "unique", "category", "agency", "marketing", "market", "grow", "growth", "client", "customer", "sale", "sell", "price", "pricing", "lead", "funnel", "audience", "reach"],
+    "strategy": ["strategy", "strategic", "plan", "planning", "decision", "choice", "direction", "focus", "product", "cut", "stop", "keep", "issue", "problem", "solution", "business", "present", "wrong", "right", "should", "could", "would", "improve", "fix", "change", "grow", "scale", "revenue", "profit", "client", "customer", "market", "position", "brand", "team", "hire", "process", "operation", "deliver", "deadline", "scope", "feedback", "revision", "creative", "design", "pitch", "idea", "concept", "art", "visual", "copy", "write", "writing", "story", "stories", "build", "ship", "experiment", "test", "feature", "need", "culture", "meeting", "communication", "remote", "office", "work-life", "balance", "sue", "legal", "contract", "agreement", "divorce", "medication", "diagnos", "prognosis", "treatment", "bug", "error", "code", "script", "program", "debug", "deploy", "framework", "library", "language"],
+    "agency-branding": ["agency", "brand", "branding", "position", "positioning", "differentiate", "differentiation", "marketing", "market", "grow", "growth", "client", "customer", "sale", "sell", "price", "pricing", "lead", "funnel", "audience", "reach", "message", "messaging", "voice", "tone"],
+    "operations": ["operation", "operations", "manage", "management", "process", "workflow", "system", "tool", "project", "deadline", "deliver", "scope", "timeline", "milestone", "task", "sprint", "culture", "team", "hire", "hiring", "fire", "firing", "meeting", "communication", "remote", "office", "work-life", "balance"],
+    "project-management": ["project", "deadline", "deliver", "scope", "timeline", "milestone", "task", "sprint", "operation", "operations", "manage", "management", "process", "workflow", "system", "tool", "culture", "team", "hire", "hiring", "fire", "firing", "meeting", "communication", "remote", "office", "work-life", "balance"],
+    "culture": ["culture", "team", "hire", "hiring", "fire", "firing", "meeting", "communication", "remote", "office", "work-life", "balance", "operation", "operations", "manage", "management", "process", "workflow", "system", "tool", "project", "deadline", "deliver", "scope", "timeline", "milestone", "task", "sprint"],
+    "product": ["product", "feature", "build", "ship", "deliver", "customer", "user", "need", "problem", "solution", "experiment", "test", "strategy", "strategic", "plan", "planning", "decision", "choice", "direction", "focus", "issue", "present", "wrong", "right", "should", "could", "would", "improve", "fix", "change", "cut", "stop", "keep", "grow", "scale", "revenue", "profit", "client", "market", "position", "brand", "team", "hire", "process", "operation", "culture", "meeting", "communication", "remote", "office", "work-life", "balance", "project", "deadline", "scope", "feedback", "revision", "creative", "design", "pitch", "idea", "concept", "art", "visual", "copy", "write", "writing", "story", "stories", "marketing", "branding", "agency", "business", "company", "sale", "sell", "price", "pricing", "lead", "funnel", "audience", "reach", "positioning", "differentiate", "differentiation", "stand out", "unique", "category", "message", "messaging", "voice", "tone", "manage", "management", "workflow", "system", "tool", "timeline", "milestone", "task", "sprint", "operation", "operations"],
 }
 
 
@@ -145,7 +146,7 @@ def route_question(
     question: str,
     dossiers: list["Dossier"],
     user_name: str = "",
-    max_seats: int = 4,
+    max_seats: int = 6,
 ) -> RoutingDecision:
     """Route a question to the board.
 
@@ -196,8 +197,9 @@ def route_question(
     # Sort by score descending, then by name for stability
     seat_scores.sort(key=lambda x: (-x[1], x[0]))
 
-    # Take top N
-    selected = [seat_id for seat_id, _ in seat_scores[:max_seats]]
+    # Take top N, but always include at least 3 seats for a meaningful meeting
+    min_seats = min(3, len(seat_scores))
+    selected = [seat_id for seat_id, _ in seat_scores[:max(max_seats, min_seats)]]
 
     if not selected:
         return RoutingDecision(

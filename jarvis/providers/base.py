@@ -99,5 +99,55 @@ class Provider(Protocol):
         system: str,
         messages: Sequence[Message],
         tools: list[dict] | None = None,
+        max_tokens: int | None = None,
     ) -> Iterator[StreamEvent]:  # pragma: no cover - protocol
         ...
+
+
+def sanitize_text(text: str) -> str:
+    """Repair lone UTF-16 surrogates so the string can be encoded as UTF-8.
+
+    Gemini streams its answer in chunks, and an emoji or other astral-plane
+    character (a surrogate *pair* in UTF-16) can be split across two SSE
+    frames. One frame then holds a lone `\\ud83d` escape, `json.loads` turns
+    that into a real lone surrogate code point, and it accumulates in the
+    conversation history. The *next* request then dies with
+
+        UnicodeEncodeError: 'utf-8' codec can't encode characters ...:
+        surrogates not allowed
+
+    even though the turn that produced it looked fine. Repairing at the point
+    of decode is what stops the poison entering history at all.
+
+    Valid pairs are combined into the real character; anything still unpaired
+    becomes U+FFFD rather than being silently dropped, so nothing shifts.
+    """
+    if not text:
+        return text
+    # Fast path: the overwhelming majority of strings have nothing to repair.
+    if not any(0xD800 <= ord(ch) <= 0xDFFF for ch in text):
+        return text
+
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        code = ord(ch)
+        if (
+            0xD800 <= code <= 0xDBFF
+            and i + 1 < n
+            and 0xDC00 <= ord(text[i + 1]) <= 0xDFFF
+        ):
+            # A valid pair: recombine into the astral character.
+            low = ord(text[i + 1])
+            out.append(chr(0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)))
+            i += 2
+            continue
+        if 0xD800 <= code <= 0xDFFF:
+            out.append("\ufffd")  # a lone surrogate: keep the position, lose the junk
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)

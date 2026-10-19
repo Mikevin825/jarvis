@@ -37,6 +37,22 @@ def build(store: MemoryStore) -> list[Tool]:
             raise ToolError(str(exc)) from exc
         return f"Remembered ({saved.id}): {saved.text}"
 
+    def save_memory(fact: str, type: str = "general", hook: str = "") -> str:
+        """Save a memory with type and hook. JARVIS decides when to call this."""
+        try:
+            saved = store.add(fact, type=type, hook=hook)
+        except MemoryError as exc:
+            raise ToolError(str(exc)) from exc
+        return f"Saved ({saved.id}, {saved.type}): {saved.text}"
+
+    def recall_memory(query: str) -> str:
+        """Search memories by keyword. Returns matching facts."""
+        results = store.search(query, limit=5)
+        if not results:
+            return f"No memories found matching '{query}'."
+        lines = [f"{r.id} | {r.type} | {r.text}" for r in results]
+        return "\n".join(lines)
+
     def list_facts() -> str:
         facts = store.facts()
         if not facts:
@@ -69,6 +85,57 @@ def build(store: MemoryStore) -> list[Tool]:
             ),
             parameters=_PARAMS_REMEMBER,
             func=remember_fact,
+        ),
+        Tool(
+            name="save_memory",
+            description=(
+                "Use this to save a memory with a type and hook. "
+                "Call it when you decide something is worth remembering — "
+                "a fact about the user, a preference, a project decision, "
+                "or a resource pointer. "
+                "Types: user, preference, project, resource, general. "
+                "Hook: one-line searchable summary."
+            ),
+            parameters={
+                "type": "OBJECT",
+                "properties": {
+                    "fact": {
+                        "type": "STRING",
+                        "description": "The fact to save, as one short plain statement.",
+                    },
+                    "type": {
+                        "type": "STRING",
+                        "description": "Memory type: user, preference, project, resource, or general.",
+                        "enum": ["user", "preference", "project", "resource", "general"],
+                    },
+                    "hook": {
+                        "type": "STRING",
+                        "description": "Optional: one-line searchable summary for recall.",
+                    },
+                },
+                "required": ["fact"],
+            },
+            func=save_memory,
+        ),
+        Tool(
+            name="recall_memory",
+            description=(
+                "Use this to search your memories by keyword. "
+                "Call it when you need to recall something from a previous session, "
+                "or when the user asks if you remember something. "
+                "Returns matching facts with their ids and types."
+            ),
+            parameters={
+                "type": "OBJECT",
+                "properties": {
+                    "query": {
+                        "type": "STRING",
+                        "description": "What to search for, e.g. 'coffee' or 'project'.",
+                    },
+                },
+                "required": ["query"],
+            },
+            func=recall_memory,
         ),
         Tool(
             name="list_facts",
@@ -105,7 +172,7 @@ def build(store: MemoryStore) -> list[Tool]:
             parameters={
                 "type": "OBJECT",
                 "properties": {
-                    "fact_id": {"type": "STRING", "description": "The id to forget."}
+                    "fact_id": {"type": "STRING", "description": "The id to forget."},
                 },
                 "required": ["fact_id"],
             },

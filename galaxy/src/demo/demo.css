@@ -110,6 +110,102 @@ button[aria-pressed="true"] {
   font-size: 11px;
 }
 
+/* -- Agent controls ---------------------------------------------------- */
+
+.controls__agents {
+  display: flex;
+  gap: 10px;
+  padding: 6px 8px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(12px);
+}
+
+.agent-control {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.agent-control__name {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding-right: 2px;
+}
+
+.agent-control button {
+  padding: 3px 8px;
+  font-size: 10px;
+}
+
+/* -- Navigation controls ------------------------------------------------- */
+
+.nav-controls {
+  position: fixed;
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 100;
+}
+
+.nav-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  transition: background 140ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 140ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.nav-btn:hover {
+  border-color: var(--accent);
+}
+
+.nav-help {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 200;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 20px 24px;
+  backdrop-filter: blur(16px);
+  min-width: 240px;
+}
+
+.nav-help__title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 12px;
+  color: var(--accent);
+}
+
+.nav-help__grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  font-size: 12px;
+}
+
+.nav-help__grid span:nth-child(odd) {
+  color: var(--fg-muted);
+}
+
 /* -- Theme corner toggle ------------------------------------------------- */
 
 .theme-corner {

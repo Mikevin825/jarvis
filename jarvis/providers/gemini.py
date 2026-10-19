@@ -24,10 +24,27 @@ from .base import (
     StreamEvent,
     TextDelta,
     TurnEnd,
+    sanitize_text,
 )
 
 # Gemini calls the assistant's turn "model", not "assistant".
 _ROLE_MAP = {"user": "user", "assistant": "model", "tool": "user"}
+
+
+def _scrub_parts(parts: Any) -> Any:
+    """Recursively repair lone surrogates inside a replayed `raw` parts list.
+
+    The replay path hands back exactly what the API sent, thought signatures
+    and all, so it cannot be rebuilt from scratch — only walked. Strings are
+    repaired; structure is preserved untouched.
+    """
+    if isinstance(parts, str):
+        return sanitize_text(parts)
+    if isinstance(parts, list):
+        return [_scrub_parts(item) for item in parts]
+    if isinstance(parts, dict):
+        return {key: _scrub_parts(value) for key, value in parts.items()}
+    return parts
 
 
 class _TransientProviderError(ProviderError):
@@ -70,8 +87,10 @@ class GeminiProvider:
         """Turn one neutral message into Gemini `parts`."""
         if message.raw is not None:
             # Replaying a model turn: send back exactly what came in, including
-            # thought signatures, or the API rejects the call.
-            return message.raw
+            # thought signatures, or the API rejects the call. The text is
+            # still scrubbed — a lone surrogate anywhere in here would fail
+            # UTF-8 encoding of the whole request.
+            return _scrub_parts(message.raw)
 
         if message.outputs:
             return [
@@ -79,9 +98,9 @@ class GeminiProvider:
                     "functionResponse": {
                         "name": out.name,
                         "response": (
-                            {"result": out.content}
+                            {"result": sanitize_text(out.content)}
                             if out.ok
-                            else {"error": out.content}
+                            else {"error": sanitize_text(out.content)}
                         ),
                     }
                 }
@@ -94,20 +113,29 @@ class GeminiProvider:
                 for c in message.calls
             ]
 
-        return [{"text": message.content}]
+        return [{"text": sanitize_text(message.content)}]
 
     def _payload(
-        self, system: str, messages: Sequence[Message], tools: list[dict] | None
+        self,
+        system: str,
+        messages: Sequence[Message],
+        tools: list[dict] | None,
+        max_tokens: int | None = None,
     ) -> dict:
         payload: dict[str, Any] = {
-            "system_instruction": {"parts": [{"text": system}]},
+            "system_instruction": {"parts": [{"text": sanitize_text(system)}]},
             "contents": [
-                {"role": _ROLE_MAP.get(m.role, "user"), "parts": self._parts_for(m)}
+                {
+                    "role": _ROLE_MAP.get(m.role, "user"),
+                    "parts": self._parts_for(m),
+                }
                 for m in messages
             ],
             "generationConfig": {
                 "temperature": self.temperature,
-                "maxOutputTokens": self.max_output_tokens,
+                # A per-call override lets the board ask for room to finish its
+                # reasoning; everything else uses the configured default.
+                "maxOutputTokens": max_tokens or self.max_output_tokens,
             },
         }
         if tools:
@@ -121,6 +149,7 @@ class GeminiProvider:
         system: str,
         messages: Sequence[Message],
         tools: list[dict] | None = None,
+        max_tokens: int | None = None,
     ) -> Iterator[StreamEvent]:
         """Stream one turn, retrying transient provider failures.
 
@@ -132,7 +161,7 @@ class GeminiProvider:
         for attempt in range(self.max_retries):
             started = False
             try:
-                for event in self._stream_once(system, messages, tools):
+                for event in self._stream_once(system, messages, tools, max_tokens):
                     if isinstance(event, TextDelta):
                         started = True
                     yield event
@@ -151,6 +180,7 @@ class GeminiProvider:
         system: str,
         messages: Sequence[Message],
         tools: list[dict] | None,
+        max_tokens: int | None = None,
     ) -> Iterator[StreamEvent]:
         url = f"{self.base_url}/models/{self.model}:streamGenerateContent"
         headers = {
@@ -170,7 +200,7 @@ class GeminiProvider:
                 url,
                 params={"alt": "sse"},
                 headers=headers,
-                json=self._payload(system, messages, tools),
+                json=self._payload(system, messages, tools, max_tokens),
                 timeout=self.timeout,
             ) as response:
                 if response.status_code != 200:
@@ -198,6 +228,10 @@ class GeminiProvider:
                             collected.append(part)
                             text = part.get("text")
                             if text:
+                                # Repair before it can reach history: a lone
+                                # surrogate here would break the NEXT request's
+                                # UTF-8 encoding (see sanitize_text).
+                                text = sanitize_text(text)
                                 text_parts.append(text)
                                 yield TextDelta(text)
                             fc = part.get("functionCall")

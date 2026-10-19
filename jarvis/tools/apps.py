@@ -135,7 +135,12 @@ def build() -> list[Tool]:
         ),
         Tool(
             name="open_url",
-            description="Use this to open a web link in the default browser.",
+            description=(
+                "Use this to open a web link in the default browser. "
+                "Call it when the user wants to VISIT or NAVIGATE to a URL, "
+                "not when they want to read or look up content from it. "
+                "For reading content, use fetch_web instead."
+            ),
             parameters=_PARAMS_URL,
             func=open_url,
         ),

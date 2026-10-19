@@ -148,6 +148,38 @@ voice:
   min_sentence_chars: 2
 
 # ---------------------------------------------------------------------------
+# The board of advisors.
+#
+# Each seat writes a position, reasoning, citations, confidence, a falsifier
+# and an abstention flag in one call. That is a lot of text, so the seat budget
+# is deliberately much larger than the brain's — at 2048 the reasoning was
+# being cut mid-sentence and the opinion read as broken in the inbox.
+# ---------------------------------------------------------------------------
+board:
+  # Output limit per seat call. 8192 leaves room for the full structure.
+  max_output_tokens: 8192
+  # Output limit for the chair's synthesis. Smaller: it writes a summary.
+  chair_max_output_tokens: 4096
+  # Hard ceiling for one whole meeting (all seats + chair), in USD.
+  max_cost_usd: 0.50
+
+
+# ---------------------------------------------------------------------------
+# The business's own online surfaces.
+#
+# Filling these in lets JARVIS answer "how is the business looking online?"
+# without being told what to look at, and lets the heartbeat check them
+# proactively. Both are optional.
+#
+# youtube_channel accepts a handle (@minurostudio), a channel URL, or a
+# channel id — the handle is resolved once and cached.
+# ---------------------------------------------------------------------------
+presence:
+  website_url: https://minuro.vercel.app/
+  youtube_channel: https://www.youtube.com/@MINUROStudio
+
+
+# ---------------------------------------------------------------------------
 # The heartbeat — the assistant reaching out on its own.
 #
 # Quiet by default: it earns the right to interrupt, it does not assume it.
@@ -198,6 +230,35 @@ heartbeat:
       # instant anything arrives is a notification, not an assistant.
       min_age_minutes: 60
       level: normal
+
+    # The scout — a scheduled research sub-agent. It hunts for competitor and
+    # product news using free sources, scores what it finds against the rubric
+    # in jarvis/scout/DOCTRINE.md, and surfaces only what clears the bar.
+    #
+    # It never acts on a find: it recommends, you decide. Most runs surface
+    # nothing, which is the intended behaviour, not a failure.
+    scout:
+      enabled: true
+      # Six hours. Research is not urgent, and each run costs model calls.
+      interval_seconds: 21600
+      # What to hunt for. Plain language — the doctrine turns this into
+      # searches. Narrow this to your actual competitors for better signal.
+      query: competitor and product news
+      # Research-tool rounds before the loop gives up. Each round is one
+      # search plus reading. 12 is generous; 8 is usually plenty.
+      max_iterations: 12
+      # Wall-clock ceiling for one run. The loop stops cleanly at this point
+      # rather than being killed mid-flight.
+      timeout_s: 180
+      level: quiet
+
+    # The board's standing review — a monthly pass over every dossier, checking
+    # whether the doctrine still holds. Needs dossiers and a provider.
+    board-standing-review:
+      enabled: true
+      # 30 days. This is a slow, deliberate check, not a frequent one.
+      interval_seconds: 2592000
+      level: quiet
 
 # ---------------------------------------------------------------------------
 # The rails — safety, confirmation, and the audit trail.

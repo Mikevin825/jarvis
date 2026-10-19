@@ -36,7 +36,7 @@ class MockProvider:
         self.usage = usage or {}
         self.calls: list[tuple[str, list[Message]]] = []
 
-    def stream(self, system, messages, tools=None):
+    def stream(self, system, messages, tools=None, max_tokens=None):
         self.calls.append((system, messages))
         yield TextDelta(text=self.response)
         yield TurnEnd(text=self.response, calls=[], usage=self.usage)
@@ -275,7 +275,7 @@ class TestRunChair:
 
         class FailingProvider:
             supports_tools = True
-            def stream(self, system, messages, tools=None):
+            def stream(self, system, messages, tools=None, max_tokens=None):
                 raise RuntimeError("Provider failed")
 
         provider = FailingProvider()

@@ -47,6 +47,8 @@ def convene_board(
     provider=None,
     business_brief: str = "",
     max_cost_usd: float = 0.50,
+    max_output_tokens: int = 8192,
+    chair_max_output_tokens: int = 4096,
 ) -> str:
     """Convene the board on a question.
 
@@ -58,6 +60,9 @@ def convene_board(
         provider: The model provider. Required.
         business_brief: The live business brief (empty if no numbers yet).
         max_cost_usd: Hard ceiling for the entire meeting.
+        max_output_tokens: Output limit per seat. Generous on purpose — a seat
+            that runs out of room is cut mid-reasoning and reads as broken.
+        chair_max_output_tokens: Output limit for the chair's synthesis.
 
     Returns:
         A summary of the meeting result.
@@ -86,6 +91,7 @@ def convene_board(
         seat_ids=routing.seat_ids,
         provider=provider,
         max_cost_usd=max_cost_usd,
+        max_output_tokens=max_output_tokens,
     )
 
     # Run the chair
@@ -94,6 +100,7 @@ def convene_board(
         dossiers=dossiers,
         provider=provider,
         business_brief=business_brief,
+        max_output_tokens=chair_max_output_tokens,
     )
 
     # Store the meeting
@@ -153,19 +160,59 @@ def convene_board(
 
 
 def build(provider=None) -> list[Tool]:
-    """Assemble the board tool.
+    """Assemble the board tools.
 
     The provider is captured in a closure so the tool function can pass it
-    to convene_board when the model calls it.
+    to convene_board when the model calls it. The token budgets come from
+    config.yaml (`board:`), so they are tunable without a code change.
     """
+    from ..config import load_config, load_dotenv
+
+    def _board_settings() -> dict:
+        """Read the board's budgets, falling back to safe defaults.
+
+        Read per call, not once at import, so editing config.yaml takes effect
+        without restarting JARVIS.
+        """
+        try:
+            load_dotenv()
+            cfg = load_config()
+            return {
+                "max_output_tokens": cfg.board.max_output_tokens,
+                "chair_max_output_tokens": cfg.board.chair_max_output_tokens,
+                "max_cost_usd": cfg.board.max_cost_usd,
+            }
+        except Exception:  # noqa: BLE001 - a config problem must not kill the tool
+            return {
+                "max_output_tokens": 8192,
+                "chair_max_output_tokens": 4096,
+                "max_cost_usd": 0.50,
+            }
+
     def _convene_board_tool(question: str) -> str:
-        return convene_board(question, provider=provider)
+        return convene_board(question, provider=provider, **_board_settings())
+
+    def _list_board_tool() -> str:
+        dossiers = _load_dossiers()
+        if not dossiers:
+            return "The board has no seats."
+        lines = ["Board of Advisors — current roster:", ""]
+        for d in dossiers:
+            lines.append(f"• {d.name} — {d.seat_title}")
+            lines.append(f"  Domains: {', '.join(d.domains)}")
+            lines.append(f"  Doctrine entries: {len(d.doctrine)}")
+            lines.append("")
+        return "\n".join(lines)
 
     return [
         Tool(
             name="convene_board",
             description=(
                 "Use this to convene the board of advisors on a question. "
+                "The board has 7 seats: Seth Godin (Growth & Marketing), "
+                "Paul Arden (Creative Strategy), Marty Neumeier (Brand & Position), "
+                "Jason Fried (Operations), Eric Ries (Lean Startup), "
+                "Marty Cagan (Product Discovery), Peter Thiel (Zero to One). "
                 "The board routes the question to the right seats, runs a "
                 "meeting in isolation, synthesizes the result, and surfaces "
                 "it in the inbox. Call it when the user asks to 'ask the "
@@ -182,5 +229,14 @@ def build(provider=None) -> list[Tool]:
                 "required": ["question"],
             },
             func=_convene_board_tool,
+        ),
+        Tool(
+            name="list_board",
+            description=(
+                "List all board members with their seat titles, domains, and "
+                "doctrine entry counts. Use this to see who is on the board."
+            ),
+            parameters={"type": "OBJECT", "properties": {}},
+            func=_list_board_tool,
         ),
     ]

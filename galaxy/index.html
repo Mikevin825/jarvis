@@ -6,6 +6,7 @@
     <title>JARVIS — galaxy</title>
     <link rel="stylesheet" href="/src/demo/tokens.css" />
     <link rel="stylesheet" href="/src/demo/demo.css" />
+    <link rel="stylesheet" href="/src/demo/labels.css" />
   </head>
   <body>
     <canvas id="scene"></canvas>
@@ -19,6 +20,10 @@
         <span class="hud__label">fps</span>
         <span class="hud__value" id="fps">–</span>
       </div>
+      <div class="hud__row">
+        <span class="hud__label">link</span>
+        <span class="hud__value" id="link">demo</span>
+      </div>
     </div>
 
     <div class="controls">
@@ -28,6 +33,26 @@
         <button class="toggle" id="mic-toggle" type="button">mic: on</button>
         <button class="toggle" id="perf-toggle" type="button">performance: auto</button>
         <button class="toggle" id="motion-toggle" type="button">reduced motion: off</button>
+      </div>
+    </div>
+
+    <!-- Navigation controls -->
+    <div class="nav-controls" id="nav-controls">
+      <button class="nav-btn" id="nav-reset" type="button" title="Reset camera (R)">⟲</button>
+      <button class="nav-btn" id="nav-zoom-in" type="button" title="Zoom in (+)">+</button>
+      <button class="nav-btn" id="nav-zoom-out" type="button" title="Zoom out (−)">−</button>
+      <button class="nav-btn" id="nav-help" type="button" title="Help (?)">?</button>
+    </div>
+
+    <!-- Help overlay -->
+    <div class="nav-help" id="nav-help-panel" style="display:none">
+      <div class="nav-help__title">Navigation</div>
+      <div class="nav-help__grid">
+        <span>Drag</span><span>Rotate camera</span>
+        <span>Scroll</span><span>Zoom in/out</span>
+        <span>R</span><span>Reset camera</span>
+        <span>+/-</span><span>Zoom in/out</span>
+        <span>?</span><span>Toggle this help</span>
       </div>
     </div>
 

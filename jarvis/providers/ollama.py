@@ -67,13 +67,17 @@ class OllamaProvider:
         system: str,
         messages: Sequence[Message],
         tools: list[dict] | None = None,
+        max_tokens: int | None = None,
     ) -> Iterator[StreamEvent]:
         url = f"{self.base_url}/api/chat"
+        options: dict = {"temperature": self.temperature}
+        if max_tokens:
+            options["num_predict"] = max_tokens
         payload = {
             "model": self.model,
             "messages": self._messages(system, messages),
             "stream": True,
-            "options": {"temperature": self.temperature},
+            "options": options,
         }
         if tools:
             payload["tools"] = [

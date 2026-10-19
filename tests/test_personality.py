@@ -195,18 +195,18 @@ def test_system_prompt_carries_the_personality(tmp_path):
 
     assistant = AssistantConfig(name="JARVIS", purpose="help", tone="crisp")
     p = load_personality(write_personality(tmp_path), force=True)
-    prompt = build_system_prompt(assistant, personality=p)
-    assert "You are JARVIS" in prompt
-    assert "Sound like this" in prompt
+    sp = build_system_prompt(assistant, personality=p)
+    assert "You are JARVIS" in sp.stable
+    assert "Sound like this" in sp.stable
 
 
 def test_system_prompt_falls_back_to_tone_without_a_file(tmp_path):
     from jarvis.config import AssistantConfig
 
     assistant = AssistantConfig(name="JARVIS", purpose="help", tone="crisp")
-    prompt = build_system_prompt(assistant, personality=Personality())
-    assert "crisp" in prompt
-    assert "Sound like this" not in prompt
+    sp = build_system_prompt(assistant, personality=Personality())
+    assert "crisp" in sp.stable
+    assert "Sound like this" not in sp.stable
 
 
 def test_system_prompt_includes_the_current_time(tmp_path):
@@ -216,6 +216,6 @@ def test_system_prompt_includes_the_current_time(tmp_path):
 
     assistant = AssistantConfig(name="JARVIS", purpose="help", tone="crisp")
     moment = datetime(2026, 10, 2, 14, 30, tzinfo=timezone.utc)
-    prompt = build_system_prompt(assistant, now=moment)
-    assert "2026" in prompt
-    assert "Current time:" in prompt
+    sp = build_system_prompt(assistant, now=moment)
+    assert "2026" in sp.dynamic
+    assert "Current time:" in sp.dynamic

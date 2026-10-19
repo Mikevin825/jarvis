@@ -169,7 +169,9 @@ def run_chair(
 
     try:
         response_text = ""
-        for event in provider.stream(system, messages):
+        for event in provider.stream(
+            system, messages, max_tokens=max_output_tokens
+        ):
             from ..providers import TextDelta, TurnEnd
 
             if isinstance(event, TextDelta):

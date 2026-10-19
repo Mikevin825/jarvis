@@ -17,6 +17,7 @@ Design constraints, taken from the spec:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import tempfile
@@ -36,7 +37,8 @@ HEADER = """\
 # knowledge and still asks before doing anything consequential.
 """
 
-_LINE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*\|\s*(.+?)\s*$")
+# Supports both old format (id | text) and new format (id | type | hook | text)
+_LINE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*\|\s*(?:([a-z]+)\s*\|\s*(.*?)\s*\|\s*)?(.+?)\s*$")
 _WORD = re.compile(r"[a-z0-9']+")
 
 
@@ -44,6 +46,8 @@ _WORD = re.compile(r"[a-z0-9']+")
 class Fact:
     id: str
     text: str
+    type: str = "general"  # user, preference, project, resource, general
+    hook: str = ""  # one-line searchable summary
 
 
 class MemoryError(RuntimeError):
@@ -53,10 +57,13 @@ class MemoryError(RuntimeError):
 class MemoryStore:
     """A small durable set of facts, stored as an editable text file."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, index_path: Path | None = None) -> None:
         self.path = path
+        self.index_path = index_path or path.parent / "memory-index.json"
         self._facts: list[Fact] = []
         self._loaded = False
+        self._index: dict[str, set[str]] = {}
+        self._index_loaded = False
 
     # -- loading and saving -------------------------------------------------
 
@@ -95,12 +102,15 @@ class MemoryStore:
                 seen.add(fact_id)
                 continue
 
-            fact_id, text = match.group(1), match.group(2)
+            fact_id = match.group(1)
+            fact_type = match.group(2) or "general"
+            hook = match.group(3) or ""
+            text = match.group(4)
             if fact_id in seen:
                 # Duplicate id from a hand edit — reassign rather than lose it.
                 fact_id = self._next_id(next_auto, seen)
             next_auto = max(next_auto, _numeric(fact_id) + 1)
-            facts.append(Fact(id=fact_id, text=text))
+            facts.append(Fact(id=fact_id, text=text, type=fact_type, hook=hook))
             seen.add(fact_id)
 
         self._facts = facts
@@ -117,7 +127,13 @@ class MemoryStore:
     def _save(self) -> None:
         """Write the store atomically, so a crash cannot truncate memory."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        body = "\n".join(f"{f.id} | {f.text}" for f in self._facts)
+        lines = []
+        for f in self._facts:
+            if f.type != "general" or f.hook:
+                lines.append(f"{f.id} | {f.type} | {f.hook} | {f.text}")
+            else:
+                lines.append(f"{f.id} | {f.text}")
+        body = "\n".join(lines)
         content = HEADER + ("\n" + body + "\n" if body else "")
 
         try:
@@ -130,6 +146,69 @@ class MemoryStore:
             os.replace(tmp, self.path)
         except OSError as exc:
             raise MemoryError(f"could not write {self.path}: {exc}") from exc
+
+    # -- search index --------------------------------------------------------
+
+    def _build_index(self) -> dict[str, set[str]]:
+        """Build a word-to-fact-ids index from the current facts."""
+        index: dict[str, set[str]] = {}
+        for fact in self._facts:
+            words = set(_WORD.findall(fact.text.lower()))
+            if fact.hook:
+                words |= set(_WORD.findall(fact.hook.lower()))
+            for word in words:
+                index.setdefault(word, set()).add(fact.id)
+        return index
+
+    def _save_index(self) -> None:
+        """Save the index to disk."""
+        index = self._build_index()
+        data = {word: sorted(ids) for word, ids in index.items()}
+        self.index_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.index_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.replace(self.index_path)
+
+    def _load_index(self) -> dict[str, set[str]]:
+        """Load the index from disk, or rebuild if missing."""
+        if not self.index_path.exists():
+            self._save_index()
+        try:
+            data = json.loads(self.index_path.read_text(encoding="utf-8"))
+            return {word: set(ids) for word, ids in data.items()}
+        except (json.JSONDecodeError, OSError):
+            self._save_index()
+            return self._build_index()
+
+    def rebuild_index(self) -> None:
+        """Force rebuild the index from the current facts."""
+        self._save_index()
+
+    def search(self, query: str, limit: int = 10) -> list[Fact]:
+        """Search facts using the index. Falls back to linear scan."""
+        self.load()
+        if not self._index_loaded:
+            self._index = self._load_index()
+            self._index_loaded = True
+
+        query_words = [w for w in _WORD.findall(query.lower()) if len(w) > 2]
+        if not query_words:
+            return []
+
+        # Score by how many query words match
+        scores: dict[str, int] = {}
+        for word in query_words:
+            for fact_id in self._index.get(word, set()):
+                scores[fact_id] = scores.get(fact_id, 0) + 1
+
+        # Sort by score, then by recency
+        fact_map = {f.id: f for f in self._facts}
+        ranked = sorted(
+            scores.items(),
+            key=lambda item: (item[1], -list(fact_map).index(item[0])),
+            reverse=True,
+        )
+        return [fact_map[fid] for fid, _ in ranked[:limit] if fid in fact_map]
 
     # -- reading ------------------------------------------------------------
 
@@ -182,7 +261,7 @@ class MemoryStore:
 
     # -- writing ------------------------------------------------------------
 
-    def add(self, text: str) -> Fact:
+    def add(self, text: str, type: str = "general", hook: str = "") -> Fact:
         text = " ".join(text.split())
         if not text:
             raise MemoryError("cannot remember an empty fact")
@@ -195,7 +274,12 @@ class MemoryStore:
         if existing is not None:
             return existing
 
-        fact = Fact(id=self._next_id(1, {f.id for f in self._facts}), text=text)
+        fact = Fact(
+            id=self._next_id(1, {f.id for f in self._facts}),
+            text=text,
+            type=type,
+            hook=hook or text[:80],
+        )
         self._facts.append(fact)
         self._save()
         return fact

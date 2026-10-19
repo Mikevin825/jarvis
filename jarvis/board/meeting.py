@@ -144,38 +144,26 @@ def _parse_seat_response(text: str) -> dict | None:
                 except json.JSONDecodeError:
                     pass
 
-    # If no JSON found, try to extract position and reasoning from prose
-    # This is a fallback — the model didn't follow the schema, but we can
-    # still extract something useful
+    # If no JSON found, extract sections from the prose the model actually
+    # wrote. Advisors reliably answer in Markdown ("**Reasoning:**", "### Position",
+    # "Reasoning:"), never the JSON the schema asks for, and each section
+    # usually spans several paragraphs — so split on the label *boundaries*
+    # and take everything up to the next label.
+    sections = _extract_sections(text)
+    if sections.get("reasoning") or sections.get("position"):
+        return {
+            "position": sections.get("position", ""),
+            "reasoning": sections.get("reasoning", ""),
+            "citations": _extract_citations(sections.get("citations", "")),
+            "confidence": _extract_confidence(sections.get("confidence", "")),
+            "would_change_mind": sections.get("would_change_mind", ""),
+            "abstains": _extract_abstains(sections.get("abstains", "")),
+        }
+
+    # Last resort: treat the whole thing as the position. Better than failing
+    # the entire seat.
     prose = text.strip()
     if len(prose) > 20:
-        # Try to find position and reasoning in the prose
-        position = ""
-        reasoning = ""
-
-        # Look for common patterns
-        if "position:" in prose.lower():
-            parts = prose.lower().split("position:", 1)
-            if len(parts) > 1:
-                position = parts[1].split("\n")[0].strip()
-        if "reasoning:" in prose.lower():
-            parts = prose.lower().split("reasoning:", 1)
-            if len(parts) > 1:
-                reasoning = parts[1].split("\n")[0].strip()
-
-        # If we found something, return it as a partial response
-        if position or reasoning:
-            return {
-                "position": position or prose[:200],
-                "reasoning": reasoning or "",
-                "citations": [],
-                "confidence": 3,
-                "would_change_mind": "",
-                "abstains": False,
-            }
-
-        # Last resort: treat the entire prose as the position
-        # This is better than failing the entire seat
         return {
             "position": prose[:500],
             "reasoning": "",
@@ -186,6 +174,120 @@ def _parse_seat_response(text: str) -> dict | None:
         }
 
     return None
+
+
+# Labels an advisor may head a section with, matched loosely so that
+# "**Position:**", "### Position", "Position:" and "position" all land in the
+# same bucket.
+_SECTION_LABELS = {
+    "position": "position",
+    "reasoning": "reasoning",
+    "citations": "citations",
+    "citation": "citations",
+    "confidence": "confidence",
+    "what would change your mind": "would_change_mind",
+    "would change your mind": "would_change_mind",
+    "would_change_mind": "would_change_mind",
+    "abstain": "abstains",
+    "abstains": "abstains",
+}
+
+
+def _extract_sections(text: str) -> dict[str, str]:
+    """Pull labelled sections out of an advisor's Markdown answer.
+
+    Sections run from one label to the next, so a multi-paragraph reasoning
+    survives intact. A label may carry its content on the same line
+    ("**Position:** Stop chasing them") or on the lines below it; both work.
+    Text before the first label (an intro line, usually) is ignored rather
+    than bolted onto the position.
+    """
+    lines = text.splitlines()
+    found: list[tuple[int, str, str]] = []  # (line index, label, inline text)
+
+    for i, raw in enumerate(lines):
+        parsed = _section_label(raw)
+        if parsed:
+            label, inline = parsed
+            found.append((i, label, inline))
+
+    if not found:
+        return {}
+
+    sections: dict[str, str] = {}
+    for idx, (start, label, inline) in enumerate(found):
+        end = found[idx + 1][0] if idx + 1 < len(found) else len(lines)
+        body = lines[start + 1 : end]
+        while body and not body[0].strip():
+            body.pop(0)
+        while body and not body[-1].strip():
+            body.pop()
+        parts = ([inline] if inline else []) + [p.rstrip() for p in body]
+        sections[label] = "\n".join(parts).strip()
+
+    return sections
+
+
+def _section_label(line: str) -> tuple[str, str] | None:
+    """Split a heading line into (canonical label, inline text).
+
+    Returns None when the line is not a section heading. Handles the Markdown
+    an advisor actually writes — "**Position:** text", "### Reasoning",
+    "Citations:" — and keeps any text that shares the line with the label.
+    """
+    stripped = line.strip()
+    if not stripped or len(stripped) > 200:
+        return None
+
+    # Strip leading Markdown heading/bold markers only; a "*" mid-line is
+    # emphasis inside the content and must survive.
+    candidate = stripped.lstrip("#*").strip()
+    if not candidate:
+        return None
+
+    # Find the label as a prefix, up to the first colon (or end of line).
+    head, sep, tail = candidate.partition(":")
+    if not sep:
+        head, tail = candidate, ""
+    head_clean = head.replace("*", "").strip().lower()
+
+    label = _SECTION_LABELS.get(head_clean)
+    if label is None:
+        return None
+
+    # Drop bold markers left around the inline content.
+    inline = tail.strip().lstrip("*").strip()
+    return label, inline
+
+
+def _extract_confidence(raw: str) -> str:
+    """Pull a 1-5 rating out of a confidence line ("5/5", "4 out of 5", "3")."""
+    import re
+
+    match = re.search(r"\b([1-5])\s*(?:/|out of)\s*5\b", raw) or re.search(
+        r"\b([1-5])\b", raw
+    )
+    return match.group(1) if match else ""
+
+
+def _extract_abstains(raw: str) -> bool:
+    """Read an abstention declaration. Anything unparseable means not abstaining."""
+    return raw.strip().lower() in ("true", "yes", "1", "abstain", "abstains")
+
+
+def _extract_citations(raw: str) -> list[str]:
+    """Keep only plausible citation entries, dropping bullets and prose."""
+    import re
+
+    out = []
+    for line in raw.splitlines():
+        entry = line.strip().lstrip("-*•").strip()
+        # A citation names a work and usually a chapter or detail.
+        if not entry or len(entry) > 160:
+            continue
+        if re.search(r"\b(chapter|page|section|pp\.|par\.|from|in)\b", entry, re.I):
+            out.append(entry)
+    return out
 
 
 def _coerce_seat_output(data: dict) -> dict:
@@ -306,7 +408,9 @@ def run_meeting(
             response_text = ""
             usage = None
 
-            for event in provider.stream(system, messages):
+            for event in provider.stream(
+                system, messages, max_tokens=max_output_tokens
+            ):
                 from ..providers import TextDelta, TurnEnd
 
                 if isinstance(event, TextDelta):

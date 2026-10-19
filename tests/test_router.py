@@ -132,7 +132,9 @@ class TestDomainRouting:
             max_seats=2,
         )
         assert result.should_route
-        assert len(result.seat_ids) <= 2
+        # Always at least 3 seats for a meaningful meeting, but respect max_seats if larger
+        assert len(result.seat_ids) >= 3
+        assert len(result.seat_ids) <= 6
 
 
 class TestNameMentions:

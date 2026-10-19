@@ -1,0 +1,6 @@
+/home/kingmike/jarvis/build/android/classes/com/jarvis/mobile/R$string.class
+/home/kingmike/jarvis/build/android/classes/com/jarvis/mobile/R.class
+/home/kingmike/jarvis/build/android/classes/com/jarvis/mobile/MainActivity.class
+/home/kingmike/jarvis/build/android/classes/com/jarvis/mobile/MainActivity$2.class
+/home/kingmike/jarvis/build/android/classes/com/jarvis/mobile/MainActivity$1.class
+/home/kingmike/jarvis/build/android/classes/com/jarvis/mobile/R$mipmap.class

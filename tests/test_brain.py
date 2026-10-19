@@ -22,7 +22,7 @@ class ScriptedProvider:
         self.turns = list(turns)
         self.calls = []
 
-    def stream(self, system, messages, tools=None):
+    def stream(self, system, messages, tools=None, max_tokens=None):
         self.calls.append(list(messages))
         turn = self.turns.pop(0) if self.turns else TurnEnd(text="", raw=None, calls=[])
         if isinstance(turn, Exception):
@@ -139,7 +139,7 @@ def test_runaway_tool_loop_is_bounded(registry):
     class AlwaysCalls:
         supports_tools = True
 
-        def stream(self, system, messages, tools=None):
+        def stream(self, system, messages, tools=None, max_tokens=None):
             yield TurnEnd(
                 text="",
                 calls=[FunctionCall(name="get_current_time", args={})],
@@ -165,7 +165,7 @@ def test_provider_failure_after_output_keeps_what_was_shown(registry):
     class FailsMidway:
         supports_tools = True
 
-        def stream(self, system, messages, tools=None):
+        def stream(self, system, messages, tools=None, max_tokens=None):
             yield TextDelta("I was saying")
             raise ProviderError("dropped")
 

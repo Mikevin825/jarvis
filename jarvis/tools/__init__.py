@@ -9,13 +9,14 @@ from __future__ import annotations
 from dataclasses import replace
 
 from ..memory import MemoryStore
-from . import apps, clock, files, memory, messages, notes, weather
+from ..presence import tools as presence_tools
+from . import apps, browser, clock, files, memory, messages, notes, reminders, system, weather, web, whatsapp
 from .base import Tool, ToolError, ToolRegistry, ToolResult
 
 __all__ = ["Tool", "ToolError", "ToolRegistry", "ToolResult", "build_registry"]
 
 # Modules whose tools need no external state. One line per capability, forever.
-_MODULES = (clock, weather, notes, apps, messages, files)
+_MODULES = (clock, weather, notes, apps, messages, files, system, browser, reminders, presence_tools, web, whatsapp)
 
 
 def build_registry(

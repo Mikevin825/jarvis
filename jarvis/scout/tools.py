@@ -17,12 +17,43 @@ from .base import Tool, ToolError
 
 _TIMEOUT = httpx.Timeout(15.0, connect=8.0)
 _HEADERS = {"User-Agent": "JARVIS-Scout/1.0 (research bot)"}
+# Search engines reject an obvious bot user-agent. A browser UA is what makes
+# DuckDuckGo lite answer with results instead of an anti-bot page.
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _decode_ddg_href(href: str) -> str:
+    """Unwrap DuckDuckGo's redirect link into the real destination URL.
+
+    DuckDuckGo lite returns links as /l/?uddg=<url-encoded>. Showing the model a
+    redirect URL would put it in findings and then in citations, so unwrap it.
+    """
+    from urllib.parse import parse_qs, unquote, urlparse
+
+    if "uddg=" not in href:
+        return href
+    try:
+        query = urlparse(href).query
+        target = parse_qs(query).get("uddg", [""])[0]
+        return unquote(target) or href
+    except Exception:  # noqa: BLE001 — a malformed link must not kill the search
+        return href
 
 
 def web_search(query: str, max_results: int = 5) -> str:
-    """Search the web using DuckDuckGo's HTML interface.
+    """Search the web using DuckDuckGo's lite interface.
 
     Free, no API key. Returns a plain-text list of results.
+
+    The lite endpoint is used rather than html.duckduckgo.com: the latter now
+    answers automated requests with HTTP 202 and an anti-bot page instead of
+    results, so the parser would silently return nothing.
     """
     query = (query or "").strip()
     if not query:
@@ -30,9 +61,9 @@ def web_search(query: str, max_results: int = 5) -> str:
 
     try:
         resp = httpx.get(
-            "https://html.duckduckgo.com/html/",
+            "https://lite.duckduckgo.com/lite/",
             params={"q": query},
-            headers=_HEADERS,
+            headers=_BROWSER_HEADERS,
             timeout=_TIMEOUT,
         )
         resp.raise_for_status()
@@ -41,16 +72,18 @@ def web_search(query: str, max_results: int = 5) -> str:
     except httpx.HTTPError as exc:
         raise ToolError(f"Could not reach the search service: {exc}") from exc
 
-    # Parse the HTML results. DuckDuckGo's HTML interface returns results in
-    # <a class="result__a"> elements with the title and URL.
+    # DuckDuckGo lite marks each result anchor with class='result-link' and uses
+    # single quotes. The href may be a /l/?uddg= redirect; unwrap it so findings
+    # cite the real URL.
     results = []
-    for match in re.finditer(
-        r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
-        resp.text,
-        re.DOTALL,
-    ):
-        url = match.group(1)
-        title = re.sub(r"<[^>]+>", "", match.group(2)).strip()
+    pattern = re.compile(
+        r"<a[^>]+href=[\"']([^\"']+)[\"'][^>]*class=[\"']result-link[\"'][^>]*>(.*?)</a>",
+        re.DOTALL | re.IGNORECASE,
+    )
+    for match in pattern.finditer(resp.text):
+        url = _decode_ddg_href(match.group(1))
+        title = re.sub(r"<[^>]+>", "", match.group(2))
+        title = title.replace("&#x27;", "'").replace("&amp;", "&").strip()
         if title and url:
             results.append(f"- {title}\n  {url}")
         if len(results) >= max_results:

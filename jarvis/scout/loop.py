@@ -198,9 +198,18 @@ def run_research_loop(
     )
 
     # Run the loop using the brain's provider directly.
-    messages: list[Message] = []
+    #
+    # The query goes in a user message, not only in the system prompt: the
+    # provider requires at least one content turn, and starting from an empty
+    # list makes every request fail with "contents is not specified".
+    messages: list[Message] = [Message(role="user", content=query)]
     stop_reason = "completed"
     error: str | None = None
+    # The loop must keep going until the model calls the terminal tool, so the
+    # break has to key off an explicit flag. Keying off stop_reason ==
+    # "completed" broke out after the first tool round, because that is also its
+    # initial value — the scout did one search and gave up.
+    terminal_called = False
 
     try:
         for iteration in range(cfg.max_iterations + 1):
@@ -217,12 +226,10 @@ def run_research_loop(
                 stop_reason = "cost_exceeded"
                 break
 
-            # Build the system prompt with the query.
-            system = f"{system_prompt}\n\nQuery: {query}"
-
-            # Stream one turn.
+            # Stream one turn. The doctrine is the system prompt; the query is
+            # already the opening user message.
             end: TurnEnd | None = None
-            for event in provider.stream(system, messages, registry.declarations()):
+            for event in provider.stream(system_prompt, messages, registry.declarations()):
                 if isinstance(event, TextDelta):
                     pass  # We don't need the text for the report
                 elif isinstance(event, TurnEnd):
@@ -268,9 +275,16 @@ def run_research_loop(
                         ok=result.ok,
                     )
                 )
+                # Record what was actually looked up. Without this the report's
+                # `searched` list is always empty and the run cannot be audited.
+                if call.name in ("web_search", "fetch_rss", "fetch_url"):
+                    target = call.args.get("query") or call.args.get("url")
+                    if target:
+                        searched.append(f"{call.name}: {target}")
                 if call.name == "emit_report":
                     # The terminal tool was called — end the loop.
                     stop_reason = "completed"
+                    terminal_called = True
                     break
 
             messages.append(
@@ -283,7 +297,7 @@ def run_research_loop(
             )
             messages.append(Message(role="tool", outputs=outputs))
 
-            if stop_reason == "completed":
+            if terminal_called:
                 break
 
     except ProviderError as exc:

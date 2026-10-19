@@ -31,6 +31,48 @@ Non-interactive, for scripted checks:
 .venv/bin/python -m jarvis -m "my name is Mike" -m "what is my name?" --show-transcript
 ```
 
+## On your phone
+
+JARVIS ships as an installable web app (PWA) — no Play Store, no APK, no build
+step. It reuses the same brain, tools, memory and session as the terminal.
+
+```bash
+./jarvis-mobile
+```
+
+It prints two things: a phone URL on your wifi (`http://<lan-ip>:8794/`) and a
+pairing token. Open the URL on your phone, paste the token once, then use your
+browser's **Add to Home Screen**. It installs with its own icon and opens
+fullscreen like a native app.
+
+The token is stored in `state/mobile-token.txt` and persists across restarts, so
+you pair once. It exists because a LAN is not a private place — every API call
+requires it, and the server refuses anything without it.
+
+Voice input uses the phone's own speech recognition, so no audio ever leaves the
+device. Consequential tools (send, spend, delete) surface an approval sheet on
+the phone and block until you tap Approve or Decline; if nobody answers within
+two minutes the action does not happen.
+
+### A real APK, if you want one
+
+The PWA above installs from the browser. If you would rather have a genuine
+installable Android app, there is one:
+
+```bash
+./build-apk.sh          # → ~/jarvis/JARVIS.apk
+adb install -r JARVIS.apk
+```
+
+It is built with the Android SDK tools directly — no Gradle, no Android Studio,
+no network at build time — and comes out around 36 KB. See `android/README.md`
+for how to install it without a cable and how to re-point it at a new IP.
+
+The APK is a thin native shell around the same web app: all conversation logic,
+tools and keys stay on the server. Only rebuild it when the shell changes; JARVIS
+itself needs no rebuild.
+
+
 ## Swapping the brain
 
 `config.yaml` decides which provider thinks. Two are wired:

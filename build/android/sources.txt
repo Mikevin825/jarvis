@@ -1,0 +1,2 @@
+/home/kingmike/jarvis/android/src/com/jarvis/mobile/MainActivity.java
+/home/kingmike/jarvis/build/android/gen/com/jarvis/mobile/R.java

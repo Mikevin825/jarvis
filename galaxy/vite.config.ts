@@ -4,8 +4,8 @@ import { join } from "path";
 import type { IncomingMessage, ServerResponse } from "http";
 
 // Serve JARVIS state files to the galaxy via HTTP.
-// The galaxy polls /state/galaxy-state.json and /state/galaxy-audio.json
-// to learn what JARVIS is doing.
+// The galaxy polls /state/galaxy-state.json, /state/galaxy-audio.json and
+// /state/galaxy-events.json to learn what JARVIS is doing.
 const STATE_DIR = join(process.env.HOME || "/home/kingmike", "jarvis", "state");
 
 function statePlugin(): Plugin {

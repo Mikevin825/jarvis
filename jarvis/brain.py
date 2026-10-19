@@ -33,6 +33,30 @@ from .untrusted import wrap_untrusted
 
 DEFAULT_MAX_TOOL_ROUNDS = 8
 
+# Which sub-agent a tool belongs to, so the galaxy's constellation can light up
+# the right avatar when that tool runs. Tools not listed here drive no agent —
+# a clock lookup is not the Scout's work.
+AGENT_FOR_TOOL: dict[str, str] = {
+    # Scout's hunting tools
+    "fetch_web": "scout",
+    "search_web": "scout",
+    "web_search": "scout",
+    "read_page": "scout",
+    # Board's tools
+    "convene_board": "board",
+    "list_board": "board",
+    # Mind's tools — the memory and knowledge surface
+    "remember_fact": "mindmap",
+    "save_memory": "mindmap",
+    "recall_memory": "mindmap",
+    "list_facts": "mindmap",
+    "update_fact": "mindmap",
+    "forget_fact": "mindmap",
+    "list_notes": "mindmap",
+    "read_note": "mindmap",
+    "write_note": "mindmap",
+}
+
 # Given the turn's text, return the facts worth showing the model. Returning ""
 # means "nothing remembered", which keeps the prompt free of an empty section.
 MemorySelector = Callable[[str], str]
@@ -76,11 +100,15 @@ class Brain:
         prompt_builder: Callable[[str], str] | None = None,
         on_usage: Callable[[dict], None] | None = None,
         voice_cue: Callable[[], str] | None = None,
+        galaxy=None,
     ) -> None:
         self.provider = provider
         self.system_prompt = system_prompt
         self.registry = registry
         self.max_tool_rounds = max_tool_rounds
+        # The galaxy bridge, if one is wired. Used to tell the constellation
+        # which sub-agent is working; None means the galaxy is not running.
+        self.galaxy = galaxy
         # Long-term memory, refreshed at the start of every turn. Recomputing it
         # per turn is what lets JARVIS use a fact it learned moments ago, and it
         # also means a hand edit to the memory file is picked up without a
@@ -94,6 +122,7 @@ class Brain:
         # way to the model and never stored in history — see the comment in
         # `_with_voice_cue`.
         self.voice_cue = voice_cue
+        self._dynamic_block = ""
         self.history: list[Message] = []
 
     # -- public -------------------------------------------------------------
@@ -110,6 +139,10 @@ class Brain:
             facts = ""
         return self.prompt_builder(facts)
 
+    def set_dynamic_block(self, dynamic: str) -> None:
+        """Set the dynamic block to prepend to the first user message."""
+        self._dynamic_block = dynamic
+
     def ask(self, user_text: str) -> Iterator[BrainEvent]:
         """Run one turn, yielding the reply and any tool activity as it happens.
 
@@ -121,8 +154,21 @@ class Brain:
         self.history.append(Message(role="user", content=user_text))
         spoken: list[str] = []
 
+        # Tell the galaxy we're thinking
+        if self.galaxy is not None:
+            try:
+                self.galaxy.set_state("thinking")
+            except Exception:
+                pass
+
         try:
             for event in self._run(user_text, spoken):
+                # Tell the galaxy we're speaking when we yield text
+                if isinstance(event, Chunk) and self.galaxy is not None:
+                    try:
+                        self.galaxy.set_state("speaking")
+                    except Exception:
+                        pass
                 yield event
         except ProviderError:
             del self.history[start:]
@@ -134,6 +180,13 @@ class Brain:
                     Message(role="assistant", content="".join(spoken))
                 )
             raise
+        finally:
+            # Tell the galaxy we're done
+            if self.galaxy is not None:
+                try:
+                    self.galaxy.set_state("idle")
+                except Exception:
+                    pass
 
     def reset(self) -> None:
         """Forget the current session. Long-term memory (Tier 4) is unaffected."""
@@ -180,7 +233,21 @@ class Brain:
 
             outputs: list[ToolOutput] = []
             for call in end.calls:
+                # Tell the galaxy which sub-agent is being dispatched, so the
+                # constellation can fire a beam before the tool even returns.
+                if self.galaxy is not None:
+                    agent = AGENT_FOR_TOOL.get(call.name)
+                    if agent is not None:
+                        self.galaxy.emit_dispatch(agent)
+                        self.galaxy.emit_working(agent, True)
+
                 result = self.registry.run(call.name, call.args)
+
+                if self.galaxy is not None:
+                    agent = AGENT_FOR_TOOL.get(call.name)
+                    if agent is not None:
+                        self.galaxy.emit_working(agent, False)
+
                 yield ToolRun(
                     name=call.name,
                     args=call.args,
@@ -250,6 +317,18 @@ class Brain:
         """Stream one model turn and return its `TurnEnd`."""
         end: TurnEnd | None = None
         outbound = self._with_voice_cue(self.history)
+        # Prepend dynamic block to first user message (always fresh)
+        if self._dynamic_block and outbound:
+            first = outbound[0]
+            if first.role == "user":
+                outbound = list(outbound)
+                outbound[0] = Message(
+                    role=first.role,
+                    content=f"{self._dynamic_block}\n\n{first.content}",
+                    calls=first.calls,
+                    outputs=first.outputs,
+                    raw=first.raw,
+                )
         for event in self.provider.stream(system, outbound, tools):
             if isinstance(event, TextDelta):
                 spoken.append(event.text)

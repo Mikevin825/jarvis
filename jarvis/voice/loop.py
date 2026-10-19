@@ -220,9 +220,10 @@ class VoiceLoop:
         buffer = ""
         spoken_all: list[str] = []
         self._speaking.set()
-        # Write non-zero audio levels so the galaxy lights up while JARVIS speaks.
+        # Tell the galaxy we're speaking and write non-zero audio levels.
         if self._galaxy_bridge is not None:
             try:
+                self._galaxy_bridge.set_state("speaking")
                 self._galaxy_bridge.set_audio_levels(0.6, 0.4, 0.2)
             except Exception:  # noqa: BLE001
                 pass
@@ -267,9 +268,10 @@ class VoiceLoop:
                     print(f"\n[cannot speak] {exc}")
         finally:
             self._speaking.clear()
-            # Reset audio levels so the galaxy goes back to idle.
+            # Reset audio levels and state so the galaxy goes back to idle.
             if self._galaxy_bridge is not None:
                 try:
+                    self._galaxy_bridge.set_state("idle")
                     self._galaxy_bridge.set_audio_levels(0, 0, 0)
                 except Exception:  # noqa: BLE001
                     pass
