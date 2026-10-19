@@ -111,7 +111,7 @@ def _channel_concerns(channel: Channel, now: datetime) -> list[str]:
             )
 
     total_views = sum(v.views for v in videos if v.views)
-    if total_views and len(videos) > 1:
+    if len(videos) >= MIN_UPLOADS_FOR_VIEW_JUDGEMENT and total_views:
         low = sum(1 for v in videos if 0 < v.views < 100)
         if low >= len(videos) // 2:
             concerns.append(
