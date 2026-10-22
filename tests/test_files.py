@@ -66,5 +66,9 @@ class TestListFiles:
             (tmp_path / f"file{i}.txt").write_text("content")
 
         result = list_files(str(tmp_path), max_results=3)
-        assert "3 file(s)" in result
+        # The count is the real total, not the number shown — telling the model
+        # "3 file(s)" when ten exist would hide that seven were cut off.
+        assert "10 file(s)" in result
         assert "and 7 more" in result
+        assert "file2.txt" in result
+        assert "file3.txt" not in result, "the 4th file should have been cut off"

@@ -104,6 +104,13 @@ def test_multiple_tools_in_one_turn(registry):
 
 
 def test_a_failing_tool_does_not_crash_the_turn(registry):
+    """A tool that fails must not take the turn down with it.
+
+    The follow-up reply is the real assertion: the brain ran the tool, saw it
+    fail, and still produced an answer. The error text is deliberately not
+    asserted — the weather service can answer "city not found" or time out, and
+    both are legitimate failures that this test does not care about.
+    """
     provider = ScriptedProvider(
         [
             {
@@ -117,7 +124,11 @@ def test_a_failing_tool_does_not_crash_the_turn(registry):
     events = list(brain.ask("weather in nowhere"))
     runs = [e for e in events if hasattr(e, "name")]
     assert runs[0].ok is False
-    assert "Qzxwvplkk" in runs[0].content
+    assert runs[0].content, "a failed tool should still report why"
+
+    # The brain recovered and answered rather than raising.
+    replies = [e for e in events if hasattr(e, "text") and e.text]
+    assert any("could not find that place" in r.text for r in replies)
 
 
 def test_unknown_tool_is_reported_not_raised(registry):

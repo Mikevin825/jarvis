@@ -103,9 +103,171 @@ jarvis/
       ollama.py          local implementation
 ```
 
+## Ways to talk to him
+
+| Mode | Command | In → Out |
+|---|---|---|
+| Voice (default) | `./jarvis` | speak → hear |
+| Wake word | `./jarvis-wake` | say "jarvis" → speak → hear |
+| Text | `./jarvis --text` | type → read |
+| **Speak** | `./jarvis-speak` or `./jarvis --speak` | **type → read *and* hear** |
+
+### Wake word
+
+```bash
+./jarvis-wake
+```
+
+Say **"hey jarvis"**, then speak your request. No key to hold.
+
+**Say "hey jarvis" — not "jarvis".** The model is trained on the full phrase;
+plain "jarvis" scores ~0.09 and will never wake him. This is the single most
+common reason it appears not to work.
+
+**This needs no account and no API key.** It runs openWakeWord, which is fully
+open source: the model runs on your CPU through onnxruntime, so nothing leaves
+the machine and there is nothing to sign up for. (Porcupine is also supported —
+see below.)
+
+Two things it does need:
+
+1. **A microphone.** Any ALSA capture device works; `arecord -l` lists yours.
+   Speak close to it — a laptop mic at arm's length scores noticeably worse
+   than one a few inches away.
+2. **The wake word model.** openWakeWord's pretrained models are not in the pip
+   package — they are fetched from its GitHub releases on first run. If that
+   download has not happened yet:
+   ```bash
+   .venv/bin/python -m jarvis.tools.fetch_wake_models
+   ```
+
+The `hey_jarvis` keyword ships with openWakeWord, which is the name this project
+always intended.
+
+After the wake word it records until you stop talking — silence is detected by
+energy, so talk, pause about a second and a half, and the turn is sent. That is
+deliberately crude next to a real voice-activity detector, but it needs nothing
+extra and behaves the way you'd expect.
+
+Sensitivity is `voice.wake_sensitivity` in `config.yaml`. Measured on real
+speech, "hey jarvis" reaches ~0.5–0.9 while ordinary sentences stay under 0.1,
+so 0.4 sits safely between them. Raise it if he misses you, lower it if he wakes
+at the television. Set `wake_word:` to empty to disable the mode entirely.
+
+#### Not waking? Diagnose it
+
+```bash
+.venv/bin/python -m jarvis.tools.wake_debug --seconds 30
+```
+
+This prints the live mic level and the model's score per frame, so you can tell
+the two failure modes apart: if the level stays near zero the mic isn't hearing
+you, if the score stays low the phrase or the distance is the problem.
+
+#### Switching to Porcupine
+
+Porcupine is purpose-built for this and cheaper on CPU, but its free key asks
+for a company email. If you ever get one, put it in `.env` as
+`PORCUPINE_ACCESS_KEY` and wake mode uses it automatically — no other change
+needed. Note Porcupine's keyword is plain `jarvis`, so if you switch engines,
+change `wake_word` back to `jarvis` too.
+
+### Speak mode
+
+Speak mode is the one for reading along while he talks: every reply is printed
+*and* read aloud in his own voice. Press **Enter** during a reply to skip the
+rest of it, and `/speak off` to silence him without leaving the session.
+
+```bash
+./jarvis-speak                 # interactive
+./jarvis --speak -m "hi"       # one shot, still spoken
+```
+
+The reply is spoken as a whole once it is finished, not word by word — a
+streamed answer read aloud as it arrives sounds broken. Text typed while he is
+speaking is kept and becomes your next message rather than being lost.
+
 ## Design rules
 
 1. Brain works in plain text before any audio exists.
 2. One agent core, many ways in and out — never fork the logic for voice.
 3. Extend the tool registry, never the core loop.
 4. Secrets live in the environment, never in source.
+
+## Business status report
+
+JARVIS can read the business's websites and YouTube channels and report on them:
+
+```bash
+.venv/bin/python -m jarvis --status-report
+```
+
+It reports whether each site is up, which pages are broken, every channel's
+recent uploads and cadence, and anything that looks wrong — and it runs
+quietly in the background via the `presence` heartbeat check, speaking only
+when something changes (a site goes down, a new video lands, a page breaks, a
+channel goes quiet).
+
+A business can run more than one brand, so targets are **lists**. They live in
+`config.yaml` under `presence:`:
+
+```yaml
+presence:
+  websites:
+    - https://minuro.vercel.app/
+    - https://second-brand.example.com      # add another line per site
+  youtube_channels:
+    - https://www.youtube.com/@MINUROStudio
+    - https://www.youtube.com/@SecondChannel
+```
+
+The singular `website_url` / `youtube_channel` fields are still honoured and
+merged into the lists, so an older config keeps working unchanged.
+
+YouTube is read from each channel's **public RSS feed** — no API key, nothing
+to revoke. Handles are resolved to a channel id once and cached. Three tools
+are also registered (`check_website`, `check_youtube_channel`,
+`business_status_report`) so JARVIS can answer the question conversationally.
+
+Each target is tracked separately, so a second brand cannot hide behind the
+first one staying healthy — if one site is down, that is what gets reported.
+
+### Analytics
+
+`--status-report` is a snapshot. For trends there is:
+
+```bash
+.venv/bin/python -m jarvis --analytics
+```
+
+It reports whether total views are growing, which videos gained the most and
+how fast, how often the channel is uploading, and each website's uptime
+percentage. History is stored in `state/presence-history.db` (SQLite) and
+appended by the heartbeat check each day, so trends appear after a few days.
+`record_presence` stores a snapshot on demand if you want to build history
+faster.
+
+### Graph sheet
+
+For the same trends as charts:
+
+```bash
+.venv/bin/python -m jarvis --graph-sheet
+```
+
+This writes `reports/presence-graph-sheet.html` — a single self-contained page
+with inline SVG charts and **no external requests**, so it opens offline on any
+device and can be archived. It draws, for every target:
+
+| Section | Charts |
+|---|---|
+| YouTube | total views over time · views by video |
+| Websites | response time · page size |
+
+The per-video chart is the one that matters: it shows *which* video is working,
+not just whether the channel total moved. That is only possible because history
+stores per-video views rather than a channel total.
+
+Websites also record **response time, page size, word count, and SSL expiry** —
+the metrics a site owner can actually act on, and all trendable.
+

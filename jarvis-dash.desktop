@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=JARVIS Desktop
+Comment=JARVIS — the galaxy and the living mind, in one window
+Exec=/home/kingmike/jarvis/jarvis-dash
+Icon=/home/kingmike/jarvis/desktop_app/icon.png
+Type=Application
+Categories=Utility;X-AI;
+Terminal=false
+StartupNotify=true
+StartupWMClass=jarvis-dash
+Keywords=jarvis;assistant;galaxy;mindmap;

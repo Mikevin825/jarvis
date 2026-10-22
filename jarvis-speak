@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Talk to JARVIS by typing, and hear the answers read aloud.
+#
+# Same as:  .venv/bin/python -m jarvis --speak
+#
+# Kept as a script rather than a bare flag so it can be double-clicked or put on
+# the desktop, and so the working directory is resolved relative to this file.
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PY="$DIR/.venv/bin/python"
+
+if [[ ! -x "$PY" ]]; then
+    echo "No virtualenv found at $DIR/.venv" >&2
+    echo "Create it with:  python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
+    exit 1
+fi
+
+cd "$DIR"
+exec "$PY" -m jarvis --speak "$@"

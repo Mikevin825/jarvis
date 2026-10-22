@@ -1,14 +1,14 @@
 """Web access — fetch and extract content from URLs.
 
-Read-only. Uses httpx for fetching and html.parser for extraction.
+Read-only. Uses httpx for fetching and :mod:`jarvis.htmltext` for extraction.
 No API key needed. Handles timeouts, errors, and non-HTML content.
 """
 
 from __future__ import annotations
 
-import re
 import httpx
 
+from ..htmltext import extract_text
 from .base import Tool, ToolError
 
 _TIMEOUT = httpx.Timeout(15.0, connect=8.0)
@@ -18,44 +18,10 @@ _HEADERS = {
     "Accept-Language": "en-US,en;q=0.5",
 }
 
-# Tags to strip entirely (with content)
-_STRIP_TAGS = re.compile(
-    r"<(script|style|nav|footer|header|aside|form|iframe|noscript|svg)[^>]*>.*?</\1>",
-    re.DOTALL | re.IGNORECASE,
-)
-# Block-level tags → newline
-_BLOCK_TAGS = re.compile(
-    r"</?(p|div|br|li|h[1-6]|tr|section|article|blockquote|pre)[^>]*>",
-    re.IGNORECASE,
-)
-# All remaining tags
-_ALL_TAGS = re.compile(r"<[^>]+>")
-# Whitespace collapse
-_WS = re.compile(r"\n{3,}")
-
 
 def _extract_text(html: str) -> str:
-    """Strip HTML tags and return readable text."""
-    # Remove script/style/etc with their content
-    text = _STRIP_TAGS.sub("", html)
-    # Replace block tags with newlines
-    text = _BLOCK_TAGS.sub("\n", text)
-    # Remove all remaining tags
-    text = _ALL_TAGS.sub("", text)
-    # Decode common HTML entities
-    text = (
-        text.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", '"')
-        .replace("&#39;", "'")
-        .replace("&nbsp;", " ")
-    )
-    # Collapse whitespace
-    text = _WS.sub("\n\n", text)
-    # Strip each line and drop empty ones
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
-    return "\n".join(lines)
+    """Backwards-compatible alias for :func:`jarvis.htmltext.extract_text`."""
+    return extract_text(html)
 
 
 def fetch_web(url: str, query: str = "") -> str:

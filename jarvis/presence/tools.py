@@ -14,29 +14,29 @@ from . import (
     YouTubeError,
     channel_summary,
     generate_status_report,
+    render_analytics,
     site_summary,
 )
 
 
-def _settings() -> dict:
+def _settings() -> tuple[tuple, tuple]:
     """Read the configured presence targets, falling back to empty.
 
-    Read per call so editing config.yaml takes effect without a restart.
+    Returns (websites, channels). Read per call so editing config.yaml takes
+    effect without a restart.
     """
     try:
         load_dotenv()
         cfg = load_config()
-        return {
-            "website_url": cfg.presence.website_url,
-            "youtube_channel": cfg.presence.youtube_channel,
-        }
+        return cfg.presence.all_websites, cfg.presence.all_channels
     except Exception:  # noqa: BLE001 - a config problem must not kill the tool
-        return {"website_url": "", "youtube_channel": ""}
+        return (), ()
 
 
 def check_website(url: str = "") -> str:
     """Fetch the business website and report what is on it and whether it works."""
-    target = (url or "").strip() or _settings()["website_url"]
+    websites, _ = _settings()
+    target = (url or "").strip() or (websites[0] if websites else "")
     if not target:
         raise ToolError(
             "No website is configured. Add `presence.website_url` to config.yaml, "
@@ -47,7 +47,8 @@ def check_website(url: str = "") -> str:
 
 def check_youtube_channel(channel: str = "") -> str:
     """Read a YouTube channel's recent uploads and cadence from its RSS feed."""
-    target = (channel or "").strip() or _settings()["youtube_channel"]
+    _, channels = _settings()
+    target = (channel or "").strip() or (channels[0] if channels else "")
     if not target:
         raise ToolError(
             "No YouTube channel is configured. Add `presence.youtube_channel` "
@@ -60,17 +61,64 @@ def check_youtube_channel(channel: str = "") -> str:
 
 
 def business_status_report() -> str:
-    """A full status report across the configured website and YouTube channel."""
-    settings = _settings()
-    if not settings["website_url"] and not settings["youtube_channel"]:
+    """A full status report across every configured website and channel."""
+    websites, channels = _settings()
+    if not websites and not channels:
         raise ToolError(
-            "Nothing is configured to report on. Add `presence.website_url` "
-            "and/or `presence.youtube_channel` to config.yaml."
+            "Nothing is configured to report on. Add `presence.websites` and/or "
+            "`presence.youtube_channels` to config.yaml."
         )
-    return generate_status_report(
-        website_url=settings["website_url"],
-        channel=settings["youtube_channel"],
+    return generate_status_report(websites=websites, channels=channels)
+
+
+def record_presence() -> str:
+    """Fetch every configured target and store a snapshot for the analytics.
+
+    The heartbeat does this automatically each day; this is for building
+    history on demand — run it a few times over a week and `--analytics` has
+    something real to work with.
+    """
+    websites, channels = _settings()
+    if not websites and not channels:
+        raise ToolError(
+            "Nothing is configured to record. Add `presence.websites` and/or "
+            "`presence.youtube_channels` to config.yaml."
+        )
+
+    from .report import build_report
+    from .history import record
+
+    report = build_report(websites=websites, channels=channels)
+    snapshot_id = record(sites=report.sites, channels=report.channels)
+
+    return (
+        f"Recorded snapshot #{snapshot_id}: "
+        f"{len(report.sites)} site(s), {len(report.channels)} channel(s)."
     )
+
+
+def presence_analytics(days: int = 30) -> str:
+    """Trends over time — views growth, upload rate, site uptime.
+
+    Needs history to exist. With less than two snapshots there is no trend to
+    report, and the output says so rather than printing zeros.
+    """
+    return render_analytics(days=days)
+
+
+def presence_graph_sheet(days: int = 30) -> str:
+    """Generate the graph sheet — every trend as a chart on one HTML page.
+
+    The file is written to reports/ and the path returned, so it can be opened
+    directly. Self-contained: no external requests, works offline.
+    """
+    from ..paths import REPORTS_DIR
+    from .graph_sheet import render_graph_sheet
+
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    path = REPORTS_DIR / "presence-graph-sheet.html"
+    path.write_text(render_graph_sheet(days=days), encoding="utf-8")
+    return f"Graph sheet written to {path}"
 
 
 def build() -> list[Tool]:
@@ -135,5 +183,66 @@ def build() -> list[Tool]:
                 "required": [],
             },
             func=business_status_report,
+        ),
+        Tool(
+            name="presence_analytics",
+            description=(
+                "Use this for trends over time rather than a snapshot: whether "
+                "total views are growing, which videos gained the most, how "
+                "often the channel is uploading, and each website's uptime "
+                "percentage. Call it when the user asks about growth, "
+                "momentum, trends, or 'how are we doing' over a period."
+            ),
+            parameters={
+                "type": "OBJECT",
+                "properties": {
+                    "days": {
+                        "type": "INTEGER",
+                        "description": (
+                            "Optional. How many days of history to analyse. "
+                            "Defaults to 30."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+            func=presence_analytics,
+        ),
+        Tool(
+            name="record_presence",
+            description=(
+                "Use this to store a snapshot of the current presence data for "
+                "the analytics. The heartbeat does this automatically each "
+                "day; call it to build history on demand."
+            ),
+            parameters={
+                "type": "OBJECT",
+                "properties": {},
+                "required": [],
+            },
+            func=record_presence,
+        ),
+        Tool(
+            name="presence_graph_sheet",
+            description=(
+                "Use this to generate the graph sheet: an HTML page with a chart "
+                "for every trend — total views, views by video, response time, "
+                "and page size. Call it when the user asks for graphs, charts, "
+                "a graph sheet, or to see the trends visually."
+            ),
+            parameters={
+                "type": "OBJECT",
+                "properties": {
+                    "days": {
+                        "type": "INTEGER",
+                        "description": (
+                            "Optional. How many days of history to chart. "
+                            "Defaults to 30."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+            func=presence_graph_sheet,
         ),
     ]

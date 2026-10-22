@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
             return real.confirm(request)
 
     try:
-        cfg, brain, store = _build_brain(gate=DeferredGuiGate())
+        cfg, brain, store, _session_store, _provider = _build_brain(gate=DeferredGuiGate())
     except ConfigError as exc:
         print(f"configuration problem: {exc}", file=sys.stderr)
         return 2

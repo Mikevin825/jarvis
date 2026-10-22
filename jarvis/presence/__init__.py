@@ -23,6 +23,7 @@ from .report import (
     generate_status_report,
     render_report,
 )
+from .analytics import render_analytics
 from .website import SiteInfo, fetch_site, site_summary
 from .youtube import Channel, Video, YouTubeError, channel_summary, fetch_channel
 
@@ -37,6 +38,7 @@ __all__ = [
     "fetch_channel",
     "fetch_site",
     "generate_status_report",
+    "render_analytics",
     "render_report",
     "site_summary",
 ]

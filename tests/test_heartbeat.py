@@ -117,9 +117,21 @@ def test_quiet_hours_can_be_disabled():
     assert q.active(datetime(2026, 10, 2, 2, 0, tzinfo=WAT)) is False
 
 
+def _force_due(schedule, name: str, moment: datetime) -> None:
+    """Make a check due at `moment`, regardless of when it was registered.
+
+    `Schedule.ensure` stamps `next_due` with the *real* clock, so a test that
+    ticks with a fixed datetime only works while that datetime is still in the
+    future. Pinning it here keeps the test meaningful on any day.
+    """
+    state = schedule.checks.get(name)
+    if state is not None:
+        state.next_due = moment
+
+
 def test_non_urgent_notice_is_held_during_quiet_hours_not_dropped(state_dir):
     """Deferring must never mean discarding."""
-    hb, _schedule, inbox = build(
+    hb, schedule, inbox = build(
         state_dir,
         [StubCheck("x", CheckResult(surfaced=True, title="Held", level=NORMAL))],
         config={
@@ -129,6 +141,7 @@ def test_non_urgent_notice_is_held_during_quiet_hours_not_dropped(state_dir):
         },
     )
     night = datetime(2026, 10, 2, 23, 30, tzinfo=WAT)
+    _force_due(schedule, "x", night)
     hb.tick(now=night)
 
     # It exists, and it is still waiting to be shown.
@@ -137,7 +150,7 @@ def test_non_urgent_notice_is_held_during_quiet_hours_not_dropped(state_dir):
 
 
 def test_urgent_notice_interrupts_even_in_quiet_hours(state_dir):
-    hb, _schedule, inbox = build(
+    hb, schedule, inbox = build(
         state_dir,
         [StubCheck("x", CheckResult(surfaced=True, title="Urgent", level=URGENT))],
         config={
@@ -146,7 +159,9 @@ def test_urgent_notice_interrupts_even_in_quiet_hours(state_dir):
             "quiet_hours_end": "07:00",
         },
     )
-    hb.tick(now=datetime(2026, 10, 2, 23, 30, tzinfo=WAT))
+    night = datetime(2026, 10, 2, 23, 30, tzinfo=WAT)
+    _force_due(schedule, "x", night)
+    hb.tick(now=night)
     assert inbox.count_pending() == 1
 
 

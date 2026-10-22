@@ -196,6 +196,7 @@ _REGISTRY = {
     MessageWatchCheck.name: MessageWatchCheck,
     "scout": None,  # Registered separately — needs a provider
     "board-standing-review": None,  # Registered separately — needs a provider
+    "presence": None,  # Registered separately — reads the configured surfaces
 }
 
 
@@ -209,6 +210,12 @@ def build_checks(config: dict, provider=None) -> list[Check]:
     for name, settings in (config or {}).items():
         settings = settings or {}
         if not settings.get("enabled", True):
+            continue
+        if name == "presence":
+            from .presence_check import PresenceCheck
+
+            interval = float(settings.get("interval_seconds", 86400))
+            built.append(PresenceCheck(interval, settings))
             continue
         if name == "scout":
             # The scout check needs a provider — skip if none given.

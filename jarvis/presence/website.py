@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from ..tools.web import _extract_text
+from ..htmltext import extract_text, extract_title
 
 _TIMEOUT = httpx.Timeout(20.0, connect=10.0)
 _HEADERS = {
@@ -45,7 +45,13 @@ class PageProbe:
 
 @dataclass
 class SiteInfo:
-    """What could be learned about the site."""
+    """What could be learned about the site.
+
+    The metrics beyond `reachable` are what make website *analytics* possible
+    rather than just an uptime check: response time and page size are the two
+    numbers a site owner can actually act on, and both are trendable once
+    history is being kept.
+    """
 
     url: str
     reachable: bool
@@ -54,6 +60,12 @@ class SiteInfo:
     probes: list[PageProbe] = field(default_factory=list)
     error: str = ""
     fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # -- measurable metrics -------------------------------------------------
+    response_time_ms: int | None = None
+    page_size_bytes: int | None = None
+    word_count: int | None = None
+    ssl_expires: str | None = None
 
     @property
     def broken_paths(self) -> list[PageProbe]:
@@ -70,6 +82,32 @@ def _normalise(url: str) -> str:
     return value.rstrip("/")
 
 
+def _ssl_expiry(host: str) -> str | None:
+    """The TLS certificate expiry date, or None if it can't be determined.
+
+    An expired certificate is the most common way a site silently breaks for
+    visitors, and it fails days before the owner notices — so it is worth
+    recording alongside the other metrics. Returns the raw `notAfter` string
+    (e.g. "Nov  6 23:59:59 2026 GMT").
+    """
+    import socket
+    import ssl
+
+    if not host.startswith("https://"):
+        return None
+    hostname = host[len("https://"):].split("/")[0]
+    try:
+        context = ssl.create_default_context()
+        with socket.create_connection((hostname, 443), timeout=5) as sock:
+            with context.wrap_socket(sock, server_hostname=hostname) as ssock:
+                cert = ssock.getpeercert()
+                if not cert:
+                    return None
+                return str(cert.get("notAfter"))
+    except Exception:  # noqa: BLE001 - cert problems are not fatal
+        return None
+
+
 def fetch_site(url: str, probe: bool = True) -> SiteInfo:
     """Fetch the site's homepage and, optionally, probe common paths."""
     base = _normalise(url)
@@ -78,7 +116,9 @@ def fetch_site(url: str, probe: bool = True) -> SiteInfo:
 
     # -- homepage ---------------------------------------------------------
     try:
+        started = datetime.now(timezone.utc)
         response = httpx.get(base, headers=_HEADERS, timeout=_TIMEOUT, follow_redirects=True)
+        elapsed_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
     except httpx.TimeoutException:
         return SiteInfo(
             url=base, reachable=False, title="", text="",
@@ -103,10 +143,19 @@ def fetch_site(url: str, probe: bool = True) -> SiteInfo:
             error=f"{base} returned {content_type or 'unknown content'}, not a web page.",
         )
 
-    text = _extract_text(response.text)
-    title = _extract_title(response.text) or base
+    text = extract_text(response.text)
+    title = extract_title(response.text) or base
 
-    info = SiteInfo(url=base, reachable=True, title=title, text=text)
+    info = SiteInfo(
+        url=base,
+        reachable=True,
+        title=title,
+        text=text,
+        response_time_ms=elapsed_ms,
+        page_size_bytes=len(response.content),
+        word_count=len(text.split()),
+        ssl_expires=_ssl_expiry(base),
+    )
 
     # -- probes ----------------------------------------------------------
     # Only probe paths the homepage actually links to. Probing a fixed list
@@ -177,14 +226,6 @@ def _probe(url: str) -> PageProbe:
     )
 
 
-def _extract_title(html: str) -> str:
-    """The `<title>` text, or an empty string."""
-    import re
-
-    match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
-    if not match:
-        return ""
-    return " ".join(match.group(1).split())
 
 
 def site_summary(url: str) -> str:

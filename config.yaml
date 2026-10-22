@@ -137,6 +137,18 @@ voice:
   ptt_key: f9
   # Press to cut JARVIS off mid-sentence (and to quit when it is silent).
   interrupt_key: esc
+  # Say his name instead of holding a key. Run with:  ./jarvis-wake
+  # Works with no key at all (openWakeWord, offline). Set PORCUPINE_ACCESS_KEY
+  # to switch to Porcupine, which is cheaper on CPU.
+  #
+  # IMPORTANT: the openWakeWord model is trained on "hey jarvis" — say "hey
+  # jarvis", not "jarvis". Plain "jarvis" scores ~0.09 and will never wake him.
+  # (Porcupine's keyword is plain "jarvis", so the two differ here.)
+  wake_word: hey jarvis
+  # openWakeWord: the score threshold. Measured on real speech — "hey jarvis"
+  # reaches ~0.5-0.9, ordinary sentences stay under 0.1. 0.4 sits between them.
+  # Porcupine: 0.0 = fewest false wakes but most misses; 1.0 = the reverse.
+  wake_sensitivity: 0.4
   speak_replies: true
   # Print what it *thought* you said next to the reply. Keep this on while
   # building: when it answers the wrong question, it shows whether the ears or
@@ -175,6 +187,21 @@ board:
 # channel id — the handle is resolved once and cached.
 # ---------------------------------------------------------------------------
 presence:
+  # The business's own online surfaces, so JARVIS knows what to check without
+  # being told each time. A business can run more than one brand, so the plural
+  # lists are the real targets — the singular fields below are still honoured
+  # and merged in, so an older config keeps working.
+  #
+  # Add a second site or channel by appending a line. YouTube accepts a handle
+  # (@name), a channel URL, or a channel id.
+  websites:
+    - https://minuro.vercel.app/
+    - https://kingmike.vercel.app/
+  youtube_channels:
+    - https://www.youtube.com/@MINUROStudio
+    - https://www.youtube.com/@KingMike-w8s
+
+  # Kept for compatibility; merged into the lists above.
   website_url: https://minuro.vercel.app/
   youtube_channel: https://www.youtube.com/@MINUROStudio
 
@@ -222,6 +249,14 @@ heartbeat:
       # Surface only once the note count reaches this.
       threshold: 10
       level: quiet
+
+    # Watches the business's own website and YouTube channel. Quiet by design:
+    # it speaks only when something changes — the site goes down, a new video
+    # appears, a page breaks, or the channel goes quiet.
+    presence:
+      enabled: true
+      interval_seconds: 86400  # daily
+      level: normal
 
     messages:
       enabled: true

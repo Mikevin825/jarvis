@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Wake-word mode: say "jarvis", then speak your request.
+#
+# Same as:  .venv/bin/python -m jarvis --wake
+#
+# Needs PORCUPINE_ACCESS_KEY in .env — a free key from
+# https://console.picovoice.ai/ . Without it this exits with instructions
+# rather than a traceback.
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PY="$DIR/.venv/bin/python"
+
+if [[ ! -x "$PY" ]]; then
+    echo "No virtualenv found at $DIR/.venv" >&2
+    exit 1
+fi
+
+cd "$DIR"
+exec "$PY" -m jarvis --wake "$@"

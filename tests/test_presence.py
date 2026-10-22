@@ -13,7 +13,8 @@ import pytest
 from jarvis.presence import report as report_mod
 from jarvis.presence import youtube as yt_mod
 from jarvis.presence.report import build_report, render_report
-from jarvis.presence.website import _extract_title, _linked_paths, _normalise
+from jarvis.presence.website import _linked_paths, _normalise
+from jarvis.htmltext import extract_title
 from jarvis.presence.youtube import Channel, Video, _channel_id_from_input, _parse_date
 
 
@@ -51,6 +52,38 @@ class TestConfigWiring:
         cfg = PresenceConfig()
         assert cfg.website_url == ""
         assert cfg.youtube_channel == ""
+
+    def test_singular_fields_are_merged_into_the_plural_views(self):
+        """Old config files keep working: the singular fields feed the lists."""
+        from jarvis.config import PresenceConfig
+
+        cfg = PresenceConfig(
+            website_url="https://a.test",
+            youtube_channel="https://www.youtube.com/@A",
+            websites=("https://b.test",),
+            youtube_channels=("https://www.youtube.com/@B",),
+        )
+        assert cfg.all_websites == ("https://a.test", "https://b.test")
+        assert cfg.all_channels == (
+            "https://www.youtube.com/@A",
+            "https://www.youtube.com/@B",
+        )
+
+    def test_duplicates_are_removed(self):
+        from jarvis.config import PresenceConfig
+
+        cfg = PresenceConfig(
+            website_url="https://a.test",
+            websites=("https://a.test", "https://b.test"),
+        )
+        assert cfg.all_websites == ("https://a.test", "https://b.test")
+
+    def test_empty_config_yields_no_targets(self):
+        from jarvis.config import PresenceConfig
+
+        cfg = PresenceConfig()
+        assert cfg.all_websites == ()
+        assert cfg.all_channels == ()
 
 
 # -- channel id resolution --------------------------------------------------
@@ -106,8 +139,8 @@ class TestReportAnalysis:
             name="Test", channel_id="UCx", url="u", joined=NOW,
             videos=[_video(days_ago=60)],
         )
-        report = build_report(website_url="", channel="")
-        report.channel = channel
+        report = build_report(websites=(), channels=())
+        report.channels.append(channel)
         report.concerns.extend(report_mod._channel_concerns(channel, NOW))
 
         assert any("60 days" in c for c in report.concerns)
@@ -148,9 +181,11 @@ class TestReportAnalysis:
 class TestRendering:
     def test_unreachable_site_is_reported_as_down(self):
         report = report_mod.StatusReport(generated_at=NOW)
-        report.website = report_mod.SiteInfo(
-            url="https://x.test", reachable=False, title="", text="",
-            error="HTTP 503",
+        report.sites.append(
+            report_mod.SiteInfo(
+                url="https://x.test", reachable=False, title="", text="",
+                error="HTTP 503",
+            )
         )
         report.concerns.append("The website is not reachable: HTTP 503")
 
@@ -163,12 +198,75 @@ class TestRendering:
         text = render_report(report)
         assert "Everything checks out" in text
 
+    def test_multiple_sites_and_channels_are_all_rendered(self):
+        report = report_mod.StatusReport(generated_at=NOW)
+        report.sites.extend(
+            [
+                report_mod.SiteInfo(
+                    url="https://a.test", reachable=True, title="Alpha", text="a"
+                ),
+                report_mod.SiteInfo(
+                    url="https://b.test", reachable=True, title="Beta", text="b"
+                ),
+            ]
+        )
+        report.channels.extend(
+            [
+                Channel(
+                    name="Channel A", channel_id="UCa", url="ua", joined=NOW,
+                    videos=[_video(3, views=10)],
+                ),
+                Channel(
+                    name="Channel B", channel_id="UCb", url="ub", joined=NOW,
+                    videos=[_video(2, views=20)],
+                ),
+            ]
+        )
+
+        text = render_report(report)
+        assert "Alpha" in text and "Beta" in text
+        assert "Channel A" in text and "Channel B" in text
+        assert text.count("Website:") == 2
+        assert text.count("YouTube:") == 2
+
+    def test_first_target_is_still_reachable_via_the_old_accessors(self):
+        """`website`/`channel` keep working for older callers and tests."""
+        report = report_mod.StatusReport(generated_at=NOW)
+        report.sites.append(
+            report_mod.SiteInfo(
+                url="https://a.test", reachable=True, title="Alpha", text="a"
+            )
+        )
+        report.channels.append(
+            Channel(
+                name="Channel A", channel_id="UCa", url="ua", joined=NOW,
+                videos=[_video(3, views=10)],
+            )
+        )
+        assert report.website is not None and report.website.title == "Alpha"
+        assert report.channel is not None and report.channel.name == "Channel A"
+
     def test_concerns_are_surfaced_first(self):
         report = report_mod.StatusReport(
-            generated_at=NOW, concerns=["The channel has not posted in 60 days."]
+            generated_at=NOW,
+            concerns=["The channel has not posted in 60 days."],
+        )
+        report.sites.append(
+            report_mod.SiteInfo(
+                url="https://x.test", reachable=True, title="X", text="hello"
+            )
+        )
+        report.channels.append(
+            Channel(
+                name="Test", channel_id="UCx", url="u", joined=NOW,
+                videos=[_video(60, views=10)],
+            )
         )
         text = render_report(report)
-        assert text.index("worth your attention") < text.index("Generated")
+        # Concerns must lead, ahead of the website and channel detail.
+        assert text.index("worth your attention") < text.index("Website:")
+        assert text.index("worth your attention") < text.index("YouTube:")
+        assert "not posted in 60 days" in text
 
 
 # -- website helpers --------------------------------------------------------
@@ -182,10 +280,10 @@ class TestWebsiteHelpers:
 
     def test_title_extraction(self):
         html = "<html><head><title>  Hello   World  </title></head></html>"
-        assert _extract_title(html) == "Hello World"
+        assert extract_title(html) == "Hello World"
 
     def test_title_absent(self):
-        assert _extract_title("<html><body>no title</body></html>") == ""
+        assert extract_title("<html><body>no title</body></html>") == ""
 
     def test_only_linked_paths_are_probed(self):
         html = (
@@ -213,7 +311,7 @@ class TestTools:
         import jarvis.presence.tools as tools_mod
 
         original = tools_mod._settings
-        tools_mod._settings = lambda: {"website_url": "", "youtube_channel": ""}
+        tools_mod._settings = lambda: ((), ())
         try:
             with pytest.raises(Exception) as exc:
                 business_status_report()
@@ -221,14 +319,54 @@ class TestTools:
         finally:
             tools_mod._settings = original
 
+    def test_the_first_configured_target_is_the_default_argument(self, monkeypatch):
+        """Calling with no argument uses the first configured target.
+
+        The fetchers are stubbed out so this tests the wiring — which target
+        gets picked — rather than hitting the network.
+        """
+        import jarvis.presence.tools as tools_mod
+
+        seen = {}
+
+        def fake_site_summary(url):
+            seen["site"] = url
+            return "Alpha site"
+
+        def fake_channel_summary(ref):
+            seen["channel"] = ref
+            return "Channel A summary"
+
+        monkeypatch.setattr(tools_mod, "_settings", lambda: (("https://a.test",), ("@A",)))
+        monkeypatch.setattr(tools_mod, "site_summary", fake_site_summary)
+        monkeypatch.setattr(tools_mod, "channel_summary", fake_channel_summary)
+
+        tools_mod.check_website()
+        tools_mod.check_youtube_channel()
+
+        assert seen["site"] == "https://a.test"
+        assert seen["channel"] == "@A"
+
     def test_check_website_requires_a_target(self):
         import jarvis.presence.tools as tools_mod
         from jarvis.tools.base import ToolError
 
         original = tools_mod._settings
-        tools_mod._settings = lambda: {"website_url": "", "youtube_channel": ""}
+        tools_mod._settings = lambda: ((), ())
         try:
             with pytest.raises(ToolError):
                 tools_mod.check_website("")
+        finally:
+            tools_mod._settings = original
+
+    def test_check_youtube_channel_requires_a_target(self):
+        import jarvis.presence.tools as tools_mod
+        from jarvis.tools.base import ToolError
+
+        original = tools_mod._settings
+        tools_mod._settings = lambda: ((), ())
+        try:
+            with pytest.raises(ToolError):
+                tools_mod.check_youtube_channel("")
         finally:
             tools_mod._settings = original

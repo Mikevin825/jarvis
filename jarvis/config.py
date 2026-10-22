@@ -102,6 +102,10 @@ class VoiceConfig:
     show_transcript: bool
     thinking_cue: bool
     min_sentence_chars: int
+    # Wake word. Empty means wake mode is off; the listener is never started.
+    wake_word: str = "jarvis"
+    # 0.0 is fewest false wakes and most misses, 1.0 the reverse.
+    wake_sensitivity: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -149,13 +153,39 @@ class BoardConfig:
 class PresenceConfig:
     """The business's own online surfaces, so JARVIS knows what to check.
 
-    Both are optional: a business with no channel still gets a website report,
-    and vice versa. `youtube_channel` accepts a handle (`@minurostudio`), a
-    channel URL, or a channel id — `presence.youtube` resolves it.
+    A business can have more than one — a second brand, a separate studio
+    channel — so the plural fields are the real targets and the singular ones
+    are kept for compatibility with earlier config files. Both are optional;
+    a business with no channel still gets a website report, and vice versa.
+
+    `youtube_channels` entries accept a handle (`@minurostudio`), a channel
+    URL, or a channel id — `presence.youtube` resolves them.
     """
 
     website_url: str = ""
     youtube_channel: str = ""
+    websites: tuple = ()
+    youtube_channels: tuple = ()
+
+    @property
+    def all_websites(self) -> tuple:
+        """Every configured website, de-duplicated, singular field included."""
+        out: list[str] = []
+        for url in (self.website_url, *self.websites):
+            url = (url or "").strip()
+            if url and url not in out:
+                out.append(url)
+        return tuple(out)
+
+    @property
+    def all_channels(self) -> tuple:
+        """Every configured channel, de-duplicated, singular field included."""
+        out: list[str] = []
+        for channel in (self.youtube_channel, *self.youtube_channels):
+            channel = (channel or "").strip()
+            if channel and channel not in out:
+                out.append(channel)
+        return tuple(out)
 
 
 @dataclass(frozen=True)
@@ -291,6 +321,10 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
             show_transcript=bool(voice_raw.get("show_transcript", True)),
             thinking_cue=bool(voice_raw.get("thinking_cue", True)),
             min_sentence_chars=int(voice_raw.get("min_sentence_chars", 2)),
+            # An empty string means "no wake word" — the listener is never
+            # started, so push-to-talk stays the only way in.
+            wake_word=str(voice_raw.get("wake_word", "jarvis") or "").strip(),
+            wake_sensitivity=float(voice_raw.get("wake_sensitivity", 0.5)),
         ),
         available_keys=available_keys,
         heartbeat=HeartbeatConfig(
@@ -317,5 +351,9 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         presence=PresenceConfig(
             website_url=str(presence_raw.get("website_url", "") or ""),
             youtube_channel=str(presence_raw.get("youtube_channel", "") or ""),
+            websites=tuple(str(u) for u in (presence_raw.get("websites") or ())),
+            youtube_channels=tuple(
+                str(c) for c in (presence_raw.get("youtube_channels") or ())
+            ),
         ),
     )

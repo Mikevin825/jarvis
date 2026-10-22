@@ -11,7 +11,10 @@ loop can be driven by a script or a test.
 from __future__ import annotations
 
 import argparse
+import os
+import select
 import sys
+import threading
 from pathlib import Path
 
 from .brain import Brain, Chunk, ToolRun
@@ -35,6 +38,73 @@ from .session import SessionStore
 from .tools import build_registry
 
 EXIT_WORDS = {"/quit", "/exit", "/q"}
+
+# Lines typed while a reply is being spoken aloud are held here rather than
+# discarded, so pressing Enter mid-speech and then typing a message still works.
+_input_buffer: list[str] = []
+
+
+def _read_input(prompt: str) -> str:
+    """`input()`, but serving anything buffered from a speech interlude first."""
+    if _input_buffer:
+        return _input_buffer.pop(0)
+    return input(prompt)
+
+
+def _speak_reply(text: str, speaker, *, interactive: bool = True) -> None:
+    """Read a reply aloud, and let the user cut it short.
+
+    A long reply can easily outlast the user's patience, so Enter stops the
+    speech. Anything else typed while it speaks is buffered and becomes the
+    next message — losing the user's words to a running speaker would be a
+    worse outcome than making them wait a moment.
+
+    When input is piped there is nobody to press Enter, and readline() at EOF
+    returns an empty line, which must not be mistaken for a skip — so the
+    speech simply plays out.
+
+    TTS failure is not fatal: the text is still on screen, and a broken voice
+    must not take down a working text session.
+    """
+    body = text.strip()
+    if not body:
+        return
+
+    done = threading.Event()
+
+    def _run() -> None:
+        try:
+            speaker.speak(body)
+        except Exception:  # noqa: BLE001 - a voice problem must not kill the turn
+            pass
+        finally:
+            done.set()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    if not interactive:
+        done.wait()
+        return
+
+    print("  (speaking — Enter to skip)", end="", flush=True)
+    while not done.is_set():
+        ready, _, _ = select.select([sys.stdin], [], [], 0.2)
+        if not ready:
+            continue
+        line = sys.stdin.readline()
+        if line == "":
+            # EOF, not a keypress — let the speech finish rather than cutting
+            # it short on the user's behalf.
+            done.wait()
+            break
+        if line.strip() == "":
+            speaker.stop()
+            print("  (stopped)")
+            return
+        _input_buffer.append(line)
+        print("  (queued while speaking)")
+    print()
+
 
 
 def _build_brain(gate=None) -> tuple:
@@ -123,6 +193,8 @@ def _run_turn(
     text: str,
     verbose_tools: bool = True,
     tracker=None,
+    speaker=None,
+    speak: bool = False,
 ) -> None:
     """Run one turn, streaming the reply to the terminal.
 
@@ -130,8 +202,13 @@ def _run_turn(
     assistant actually did, not just what it said. The name prefix is printed
     only once real text arrives, so a failure before any output never leaves a
     dangling prompt on screen.
+
+    With `speak`, the reply is also read aloud once it is complete — the text
+    is collected here rather than spoken chunk by chunk, so the voice gets a
+    whole answer instead of a staccato one.
     """
     spoke = False
+    parts: list[str] = []
     try:
         for event in brain.ask(text):
             if isinstance(event, ToolRun):
@@ -151,6 +228,7 @@ def _run_turn(
                     print(f"{name} › ", end="", flush=True)
                     spoke = True
                 print(event.text, end="", flush=True)
+                parts.append(event.text)
     except ProviderError as exc:
         # A network call failed. Shrug it off, say so clearly, keep the session.
         if spoke:
@@ -168,6 +246,9 @@ def _run_turn(
         print()
     else:
         print(f"{name} › (no reply)")
+
+    if speak and speaker is not None:
+        _speak_reply("".join(parts), speaker, interactive=sys.stdin.isatty())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -202,6 +283,22 @@ def main(argv: list[str] | None = None) -> int:
         help="start the typed text interface instead of voice",
     )
     parser.add_argument(
+        "--speak",
+        action="store_true",
+        help=(
+            "typed text in, spoken replies out: type a message, read the answer "
+            "and hear it read aloud (implies --text)"
+        ),
+    )
+    parser.add_argument(
+        "--wake",
+        action="store_true",
+        help=(
+            "listen for the wake word instead of holding a key: say the wake "
+            "word, then speak your request (implies voice mode)"
+        ),
+    )
+    parser.add_argument(
         "--say",
         metavar="TEXT",
         help="speak this text aloud and exit (tests the voice output path)",
@@ -226,8 +323,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--status-report",
+        dest="status_report",
         action="store_true",
         help="read the configured website and YouTube channel, print a status report, exit",
+    )
+    parser.add_argument(
+        "--analytics",
+        dest="analytics",
+        action="store_true",
+        help="print trends over time — views growth, upload rate, site uptime — and exit",
+    )
+    parser.add_argument(
+        "--graph-sheet",
+        dest="graph_sheet",
+        action="store_true",
+        help="write an HTML graph sheet of every trend to reports/ and exit",
     )
     parser.add_argument(
         "--memory",
@@ -476,19 +586,33 @@ def main(argv: list[str] | None = None) -> int:
     if args.status_report:
         from .presence import generate_status_report
 
-        if not cfg.presence.website_url and not cfg.presence.youtube_channel:
+        if not cfg.presence.all_websites and not cfg.presence.all_channels:
             print(
                 "Nothing is configured to report on.\n"
-                "Add `presence.website_url` and/or `presence.youtube_channel` "
+                "Add `presence.websites` and/or `presence.youtube_channels` "
                 "to config.yaml."
             )
             return 2
         print(
             generate_status_report(
-                website_url=cfg.presence.website_url,
-                channel=cfg.presence.youtube_channel,
+                websites=cfg.presence.all_websites,
+                channels=cfg.presence.all_channels,
             )
         )
+        return 0
+
+    # -- analytics: trends over time ------------------------------------------
+    if args.analytics:
+        from .presence import render_analytics
+
+        print(render_analytics())
+        return 0
+
+    # -- graph sheet: every trend as a chart ----------------------------------
+    if args.graph_sheet:
+        from .presence.tools import presence_graph_sheet
+
+        print(presence_graph_sheet())
         return 0
 
     # -- list the voices an ElevenLabs key can actually use ------------------
@@ -588,10 +712,11 @@ def main(argv: list[str] | None = None) -> int:
         loop.handle_recording(path, consume=False)  # keep the fixture
         return 0
 
-    # -- the voice interface (default unless --text is given) -----------------
-    # Voice is the default input mode. --text opts into the typed interface.
+    # -- the voice interface (default unless --text or --speak is given) ------
+    # Voice is the default input mode. --text and --speak both opt into the
+    # typed interface; --speak additionally reads every reply aloud.
     # -m messages and piped stdin still work as non-interactive input.
-    if not args.text and not args.message and sys.stdin.isatty():
+    if not args.text and not args.speak and not args.message and sys.stdin.isatty():
         from .voice import (
             CaptureError,
             SpeechError,
@@ -625,6 +750,67 @@ def main(argv: list[str] | None = None) -> int:
             galaxy_bridge=bridge,
         )
         loop.brain.name = name  # so the loop can greet with the right name
+
+        # -- wake word mode: no key to hold, just say his name ---------------
+        # The listener is a producer; the loop still owns the turn.
+        if args.wake:
+            from .voice.wake import (
+                OPENWAKEWORD_KEYWORDS,
+                OpenWakeWordDetector,
+                PorcupineDetector,
+                WakeError,
+                WakeListener,
+            )
+
+            if not cfg.voice.wake_word:
+                print(
+                    "wake_word is empty in config.yaml — set it to a keyword\n"
+                    "  (jarvis is built in) or drop --wake to use push-to-talk.",
+                    file=sys.stderr,
+                )
+                return 2
+
+            # Porcupine when a key is configured, openWakeWord otherwise. The
+            # latter needs no account and no key, which is the whole reason it
+            # is here: Picovoice's free tier asks for a company email.
+            access_key = os.environ.get("PORCUPINE_ACCESS_KEY", "").strip()
+            try:
+                if access_key:
+                    detector = PorcupineDetector(
+                        access_key=access_key,
+                        keyword=cfg.voice.wake_word,
+                        sensitivity=cfg.voice.wake_sensitivity,
+                    )
+                    engine = "porcupine"
+                else:
+                    # The two engines name the same word differently.
+                    keyword = OPENWAKEWORD_KEYWORDS.get(
+                        cfg.voice.wake_word, cfg.voice.wake_word
+                    )
+                    detector = OpenWakeWordDetector(
+                        keyword=keyword,
+                        threshold=cfg.voice.wake_sensitivity,
+                    )
+                    engine = "openwakeword"
+            except WakeError as exc:
+                print(f"cannot start wake mode: {exc}", file=sys.stderr)
+                return 2
+
+            listener = WakeListener(detector, submit=loop.submit_recording)
+            listener.start()
+            print(
+                f"{name} is listening for \"{cfg.voice.wake_word}\" ({engine}). "
+                "Say it, then speak your request."
+            )
+            try:
+                return loop.run()
+            except CaptureError as exc:
+                print(f"cannot capture audio: {exc}", file=sys.stderr)
+                return 2
+            finally:
+                listener.stop()
+                detector.close()
+
         try:
             return loop.run()
         except CaptureError as exc:
@@ -646,10 +832,25 @@ def main(argv: list[str] | None = None) -> int:
     if not scripted and not sys.stdin.isatty():
         scripted = [line for line in sys.stdin.read().splitlines() if line.strip()]
 
+    # Speak mode applies here too: `jarvis --speak -m "hi"` should talk back.
+    _scripted_speaker = None
+    _scripted_speaking = False
+    if scripted and args.speak:
+        from .voice import SpeechError, build_speaker
+
+        try:
+            _scripted_speaker = build_speaker(cfg.tts)
+            _scripted_speaking = True
+        except SpeechError as exc:
+            print(f"Speak mode unavailable, continuing in text only: {exc}")
+
     if scripted:
         for text in scripted:
             print(f"you › {text}")
-            _run_turn(brain, name, text, tracker=tracker)
+            _run_turn(
+                brain, name, text, tracker=tracker,
+                speaker=_scripted_speaker, speak=_scripted_speaking,
+            )
 
         tracker.save()
         if cfg.rails.show_cost and tracker.session.calls:
@@ -671,6 +872,24 @@ def main(argv: list[str] | None = None) -> int:
     # Interactive.
     print(f"{name} is awake. Provider: {cfg.brain.provider} ({cfg.brain.model}).")
     print(f"{len(brain.registry.names())} tools available (see --tools).")
+
+    # -- the speak mode: typed in, spoken out --------------------------------
+    # The speaker is built lazily and only in this mode, so a machine with no
+    # TTS configured can still run the plain text interface.
+    speaker = None
+    speaking = False
+    if args.speak:
+        from .voice import SpeechError, build_speaker
+
+        try:
+            speaker = build_speaker(cfg.tts)
+            speaking = True
+            print(
+                "Speak mode: every reply is read aloud. "
+                "Press Enter during speech to skip; /speak off to silence."
+            )
+        except SpeechError as exc:
+            print(f"Speak mode unavailable, continuing in text only: {exc}")
 
     # -- voice verification ---------------------------------------------------
     heartbeat = None
@@ -723,7 +942,7 @@ def main(argv: list[str] | None = None) -> int:
 
     while True:
         try:
-            text = input("you › ")
+            text = _read_input("you › ")
         except (EOFError, KeyboardInterrupt):
             print()
             break
@@ -752,6 +971,29 @@ def main(argv: list[str] | None = None) -> int:
             brain.reset()
             print("(session cleared)")
             continue
+        if text == "/speak":
+            speaking = not speaking
+            if speaking and speaker is None:
+                print("(no speaker available — speak mode failed to start)")
+                speaking = False
+            else:
+                print(f"(replies will {'now be' if speaking else 'no longer be'} spoken aloud)")
+            continue
+        if text.startswith("/speak "):
+            choice = text.split(None, 1)[1].strip().lower()
+            if choice in ("on", "true", "yes"):
+                speaking = True
+            elif choice in ("off", "false", "no"):
+                speaking = False
+            else:
+                print("(use /speak on or /speak off)")
+                continue
+            if speaking and speaker is None:
+                print("(no speaker available — speak mode failed to start)")
+                speaking = False
+            else:
+                print(f"(replies will {'now be' if speaking else 'no longer be'} spoken aloud)")
+            continue
         if text == "/inbox":
             waiting = inbox.pending()
             if not waiting:
@@ -764,7 +1006,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"(dismissed {inbox.dismiss_all()} notice(s))")
             continue
 
-        _run_turn(brain, name, text, tracker=tracker)
+        _run_turn(brain, name, text, tracker=tracker, speaker=speaker, speak=speaking)
         session_store.save(brain.history)
 
     if heartbeat is not None:
