@@ -101,9 +101,32 @@ def _save_cache(cache: dict) -> None:
         pass  # a failed cache write is not worth failing the report over
 
 
+def _strip_reference_decoration(channel: str) -> str:
+    """Remove the decoration a caller may wrap around a channel reference.
+
+    The model does not always hand back the bare value. It has been seen to
+    pass a reference in the shape it read it — ``@url:`https://…```, or a
+    handle in quotes — and none of that decoration is part of the channel.
+    Left in place it changes the handle: ``@KingMike-w8s``` is not the handle
+    ``KingMike-w8s``, so the cache misses and the lookup fails on a channel
+    that plainly exists.
+
+    Only the wrappers are removed; what is underneath is read exactly as
+    before, so a clean input behaves identically.
+    """
+    value = (channel or "").strip()
+    # A leading `@kind:` directive (`@url:`, `@file:`, …) is a reference
+    # marker, not part of the value it points at.
+    value = re.sub(r"^@[A-Za-z][\w-]*:", "", value).strip()
+    # One layer of matching quotes/backticks around the whole value.
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "`\"'":
+        value = value[1:-1].strip()
+    return value
+
+
 def _channel_id_from_input(channel: str) -> str | None:
     """Extract a channel id if the caller already supplied one or a channel URL."""
-    value = (channel or "").strip()
+    value = _strip_reference_decoration(channel)
     if not value:
         return None
 
@@ -149,15 +172,41 @@ def _resolve_via_curl(url: str) -> str:
     return result.stdout.decode("utf-8", "replace")
 
 
+# URL shapes that identify a single *video*, not a channel. A channel URL is
+# `youtube.com/@handle` or `youtube.com/channel/UC…`; none of these appear in one.
+_VIDEO_MARKERS = ("watch?v=", "youtu.be/", "/shorts/", "/live/", "/embed/", "/v/")
+
+
+def _looks_like_video(value: str) -> bool:
+    """True when the reference points at one video rather than at a channel.
+
+    A video URL must not be resolved as a channel. The page fetch does find an
+    `externalId` on it, but it belongs to whatever channel YouTube happens to
+    advertise on that page — verified: `watch?v=sH3cQWNYCfg` (a King Mike
+    upload) resolved to a channel called "WATCH". Answering that silently is
+    worse than refusing, so the reference is rejected up front.
+    """
+    lowered = value.lower()
+    return any(marker in lowered for marker in _VIDEO_MARKERS)
+
+
 def resolve_channel(channel: str) -> str:
     """Turn a handle, a URL, or a channel id into a channel id.
 
     A handle such as `@minurostudio` is looked up once and cached, so the
     channel page is only fetched when the cache has no entry for it.
     """
-    value = (channel or "").strip()
+    value = _strip_reference_decoration(channel)
     if not value:
         raise YouTubeError("No YouTube channel was given.")
+
+    if _looks_like_video(value):
+        raise YouTubeError(
+            f"That is a video link, not a channel: {value}. Ask which channel "
+            "they mean and use its @handle or its channel URL "
+            "(youtube.com/channel/UC…) — a video link cannot be resolved to the "
+            "channel reliably."
+        )
 
     direct = _channel_id_from_input(value)
     if direct:
@@ -223,9 +272,16 @@ def fetch_channel(channel: str, max_videos: int = MAX_VIDEOS) -> Channel:
         raise YouTubeError(f"Could not reach the YouTube feed: {exc}") from exc
 
     if response.status_code == 404:
+        # A 404 is ambiguous here: it is how YouTube says both "no such
+        # channel" and "the feed service is having a problem". Verified during
+        # a feed outage — valid channels including TED returned 404 and then
+        # 500. Claiming the channel does not exist is the one reading that
+        # panics a user over a transient failure, so this says what is actually
+        # known and leaves the alternative open.
         raise YouTubeError(
-            f"No channel exists with id {channel_id}. "
-            "Check the handle or paste the channel URL from your browser."
+            f"YouTube's channel feed returned 404 for {channel_id}. "
+            "That is usually the feed being unavailable rather than the "
+            "channel missing — try again shortly."
         )
     if response.status_code != 200:
         raise YouTubeError(

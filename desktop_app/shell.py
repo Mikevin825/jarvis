@@ -54,13 +54,15 @@ def is_server_up(url):
         return False
 
 def main():
-    url = "http://localhost:8792/"
+    # The combined dashboard is at port 8790 (galaxy_server), but mindmap needs 8792
+    # We use the galaxy_server which serves the dashboard with both views
+    url = "http://localhost:8790/"
     if len(sys.argv) > 1:
         url = sys.argv[1]
 
     chrome_cmd = [
         "google-chrome",
-        "--window-size=1280,800",
+        "--window_size=1280,800",
         "--no-first-run",
         "--disable-session-crashed-bubble",
         "--no-default-browser-check",
@@ -83,9 +85,9 @@ def main():
     # Open splash in Chrome
     subprocess.Popen(chrome_cmd + [f"--app=file://{splash_path}"])
 
-    # Start the server in the background
+    # Start galaxy_server in the background (serves the combined dashboard)
     subprocess.Popen(
-        [sys.executable, "mindmap_server.py"],
+        [sys.executable, "galaxy_server.py"],
         cwd="/home/kingmike/jarvis",
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -100,6 +102,17 @@ def main():
             break
     else:
         print("Server failed to start within 60s")
+        
+    # Also start mindmap_server if not running (needed for API calls)
+    mindmap_url = "http://localhost:8792/api/mind-map"
+    if not is_server_up(mindmap_url):
+        print("Starting mindmap server...")
+        subprocess.Popen(
+            [sys.executable, "mindmap_server.py"],
+            cwd="/home/kingmike/jarvis",
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
 if __name__ == "__main__":
     main()

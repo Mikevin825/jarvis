@@ -11,13 +11,18 @@ a table.
 
 Everything is computed from stored snapshots, so it works offline and it is
 reproducible — the same history always yields the same analytics.
+
+`render_analytics` is the growth report. `render_daily` is the per-day report:
+the same history read at day granularity, which is what "how many people used
+this today" actually asks. The arithmetic lives in `daily.py`, kept pure so it
+can be tested without a database.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from . import history
+from . import daily, history
 
 # Below this many snapshots there is no trend to speak of, only a data point.
 MIN_SNAPSHOTS_FOR_TREND = 2
@@ -214,6 +219,146 @@ def render_analytics(days: int = 30) -> str:
 
     for url in sites:
         lines.extend(_site_analytics(url, url, days))
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+# -- per-day traffic ---------------------------------------------------------
+
+
+def _daily_channel_lines(channel_id: str, name: str, days: int) -> list[str]:
+    """Per-day views for one channel, plus each video's daily rate."""
+    lines: list[str] = [f"YouTube: {name}"]
+
+    # include_baseline: without the snapshot before the window the first day is
+    # not measurable at all (see history.channel_video_views).
+    video_views = history.channel_video_views(channel_id, days=days, include_baseline=True)
+    day_series = daily.daily_channel_views(video_views)
+
+    if not day_series:
+        lines.append("  No per-day traffic yet — one snapshot is not a day of traffic.")
+        return lines
+
+    total = daily.total_in_window(day_series)
+    average = daily.average_per_day(day_series)
+    if total == 0:
+        # Saying "busiest day: 0" is worse than saying there was nothing: it
+        # reads as a measurement of zero rather than as an absence of traffic.
+        lines.append(
+            f"  Views per day: none recorded across {len(day_series)} day(s) "
+            "in this window."
+        )
+    else:
+        lines.append(
+            f"  Views per day: {total:,} in total, {average:.1f}/day on average "
+            f"over {len(day_series)} day(s)"
+        )
+        best = daily.best_day(day_series)
+        quiet = daily.quietest_day(day_series)
+        if best is not None:
+            lines.append(f"  Busiest day: {_fmt(best[0])} — {best[1]:,}")
+        if quiet is not None:
+            lines.append(f"  Slowest day: {_fmt(quiet[0])} — {quiet[1]:,}")
+
+    lines.append("")
+    lines.append("  Day by day:")
+    lines.append(
+        "    " + " · ".join(f"{when.strftime('%d %b')}: {views:,}" for when, views in day_series)
+    )
+
+    # Per-video rate: which upload is actually pulling its weight.
+    rows: list[tuple[str, float]] = []
+    for video_id, points in video_views.items():
+        pace = daily.video_pace(points)
+        if pace is not None:
+            rows.append((video_id, pace))
+    if rows:
+        rows.sort(key=lambda row: row[1], reverse=True)
+        titles = history.video_titles(channel_id)
+        lines.append("")
+        lines.append("  Views per day, by video:")
+        for video_id, pace in rows[:6]:
+            title = titles.get(video_id) or video_id
+            lines.append(f"    {title}: {pace:.1f}/day")
+
+    # A video with a single sighting has nothing to be differenced against, so
+    # it cannot be turned into a day of traffic. Dropping it silently is the
+    # wrong call though: the first sighting is often the biggest event in the
+    # window. It is named instead, with the count at first sighting, and the
+    # day series stays strictly comparable.
+    first_sightings = [
+        (video_id, points[0][1])
+        for video_id, points in video_views.items()
+        if len(points) == 1
+    ]
+    if first_sightings:
+        titles = history.video_titles(channel_id)
+        lines.append("")
+        lines.append("  First seen in this window — not yet measurable per day:")
+        for video_id, views in first_sightings:
+            title = titles.get(video_id) or video_id
+            lines.append(f"    {title}: {views:,} views at first sighting")
+
+    return lines
+
+
+def _daily_site_lines(url: str, days: int) -> list[str]:
+    """Per-day visitors for one website.
+
+    The honest answer today is that there is nothing to report: neither site
+    carries an analytics snippet, so no visitor count exists to read. Saying so
+    beats printing a zero, which reads as "nobody visited" rather than "nobody
+    counted".
+    """
+    lines: list[str] = [f"Website: {url}"]
+    lines.append(
+        "  Visitors per day: no traffic source is configured for this site, so "
+        "there is no visitor count to report."
+    )
+    lines.append(
+        "  Add an analytics snippet to the site (or point JARVIS at one) and "
+        "this section will fill in."
+    )
+    return lines
+
+
+def render_daily(days: int = 30) -> str:
+    """The per-day report — traffic at day granularity.
+
+    Views, not people: YouTube's feed reports a cumulative view count and cannot
+    say how many distinct viewers there were, so "views/day" is the honest
+    figure. The same limit applies to any website source that counts visits.
+    """
+    total = history.snapshot_count()
+    if total == 0:
+        return (
+            "Per-day traffic\n"
+            "No history recorded yet.\n\n"
+            "The heartbeat records a snapshot each run; a day of traffic needs "
+            "two of them. Run `--status-report` to record one now."
+        )
+
+    first, last = history.date_range()
+    lines: list[str] = [
+        f"Per-day traffic — last {days} days",
+        f"History: {total} snapshot(s), {_fmt(first)} → {_fmt(last)}",
+        "",
+        "Views, not people: YouTube counts views, so a day with 3 views may be "
+        "3 people or 1 person watching 3 times.",
+        "",
+    ]
+
+    channels = history.tracked_channels()
+    sites = history.tracked_sites()
+    names = history.channel_names()
+
+    for channel_id in channels:
+        lines.extend(_daily_channel_lines(channel_id, names.get(channel_id) or channel_id, days))
+        lines.append("")
+
+    for url in sites:
+        lines.extend(_daily_site_lines(url, days))
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"

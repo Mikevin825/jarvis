@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
 from .inbox import NORMAL, QUIET, URGENT
+from .resource_checks import CPUCheck, MemoryCheck, DiskCheck, TemperatureCheck, BatteryCheck
 
 
 @dataclass
@@ -194,6 +195,12 @@ _REGISTRY = {
     ClockCheck.name: ClockCheck,
     NoteCountCheck.name: NoteCountCheck,
     MessageWatchCheck.name: MessageWatchCheck,
+    # Resource monitoring checks
+    CPUCheck.name: CPUCheck,
+    MemoryCheck.name: MemoryCheck,
+    DiskCheck.name: DiskCheck,
+    TemperatureCheck.name: TemperatureCheck,
+    BatteryCheck.name: BatteryCheck,
     "scout": None,  # Registered separately — needs a provider
     "board-standing-review": None,  # Registered separately — needs a provider
     "presence": None,  # Registered separately — reads the configured surfaces

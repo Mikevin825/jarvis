@@ -79,13 +79,16 @@ stt:
 # The mouth — text to speech.
 # ---------------------------------------------------------------------------
 tts:
+  provider: fish
+  voice: "14129c3e320149449d6bada6862f7338"
   # "espeak" — local, instant, no key, no network. Robotic but dependable.
   # "edge"  — free Microsoft neural voices. No key, needs network. Much more
   #           natural than espeak; switch here to try it.
   # "piper" — fully offline neural voices. No key, no network, very fast.
   # "elevenlabs" — the most natural of all; needs ELEVENLABS_API_KEY in .env.
   #           Check which voices your key can use with: jarvis --voices
-  provider: elevenlabs
+  # "fish"     — high-quality free tier (s2.1-pro-free). Needs FISH_API_KEY.
+  #           Browse voices at: https://fish.audio/library
 
   edge:
     # Browse voices: .venv/bin/python -m edge_tts --list-voices
@@ -123,6 +126,14 @@ tts:
     model: eleven_flash_v2_5
     timeout_seconds: 60
     api_key_env: ELEVENLABS_API_KEY
+
+  fish:
+    # High-quality free neural voices. Browse voices at fish.audio/library.
+    # The voice ID is the 32-character hash in the URL, e.g.:
+    #   https://fish.audio/m/14129c3e320149449d6bada6862f7338
+    voice: 14129c3e320149449d6bada6862f7338
+    model: s2.1-pro-free  # free tier
+    api_key_env: FISH_API_KEY
 
 # ---------------------------------------------------------------------------
 # The voice interface itself.

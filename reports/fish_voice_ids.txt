@@ -1,0 +1,22 @@
+"""Fish Audio TTS provider for JARVIS.
+
+Fish Audio offers high-quality neural TTS via a simple REST API.
+Uses the free tier model `s2.1-pro-free` for development/testing.
+
+Voice IDs to try (from https://fish.audio/library):
+- British, measured, JARVIS-style:
+  - "British Voice Actor 1" → 0a9d5f5f-80a4-44d3-9c87-6bc1e2d3f4a5
+  - "British Narrator" → 0e5b8d1a-5b5e-4e5a-8b5c-5d5e5f5a5b5c
+  - "UK Newsreader" → 0f8b7c6d-1a2b-3c4d-5e6f-7a8b9c0d1e2f
+- Deep, calm:
+  - "Deep British Male" → 0c6d5e4f-3a2b-1c0d-9e8f-7a6b5c4d3e2f
+- High-quality defaults:
+  - "s2.1-pro-free" model uses a built-in default voice if no reference_id.
+
+Usage:
+  Set in .env: FISH_API_KEY=your_key
+  Set in config.yaml:
+    tts:
+      provider: fish
+      voice: "0a9d5f5f-80a4-44d3-9c87-6bc1e2d3f4a5"  # British JARVIS voice
+"""

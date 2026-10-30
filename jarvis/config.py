@@ -88,10 +88,18 @@ class TtsConfig:
     # piper
     voices_dir: str | None = None
     length_scale: float = 1.0
+    # Fish Audio
+    speed: float = 1.0
+    volume_db: float = 0.0  # Fish uses dB, not string like "+0%"
+    normalize: bool = True
     # Keys for every configured provider, not just the active one. Switching
     # provider in config.yaml must not make an already-pasted key invisible —
     # that is what `--voices` and a mid-conversation swap both depend on.
     api_keys: dict = field(default_factory=dict)
+    # Settings for every configured provider block, not just the active one.
+    # The fallback chain needs another provider's voice and rate, and reading
+    # only the active block would silently substitute defaults instead.
+    providers: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -267,6 +275,12 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     stt_key = stt_keys.get(stt_provider)
     tts_key = tts_keys.get(tts_provider)
 
+    # Every provider block's settings, so a fallback to another provider can
+    # honour the voice and rate configured for it rather than guessing.
+    tts_providers = {
+        name: block for name, block in tts_raw.items() if isinstance(block, dict)
+    }
+
     available_keys = {
         "brain": {provider: bool(api_key)},
         "stt": {name: True for name in stt_keys},
@@ -309,7 +323,11 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
             pitch=str(tts_block.get("pitch", "+0Hz")),
             voices_dir=tts_block.get("voices_dir"),
             length_scale=float(tts_block.get("length_scale", 1.0)),
+            speed=float(tts_block.get("speed", 1.0)),
+            volume_db=float(tts_block.get("volume_db", 0.0)),
+            normalize=bool(tts_block.get("normalize", True)),
             api_keys=tts_keys,
+            providers=tts_providers,
         ),
         voice=VoiceConfig(
             # Default must match VoiceConfig's own default. It is F9, not space:

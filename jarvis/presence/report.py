@@ -154,7 +154,12 @@ def render_report(report: StatusReport) -> str:
     """Turn a report into prose worth reading in an inbox notice."""
     lines: list[str] = []
     lines.append("Business status report")
-    lines.append(f"Generated: {report.generated_at.strftime('%d %b %Y, %H:%M')}")
+    # Local time, not UTC: `generated_at` is kept tz-aware UTC internally (the
+    # report's age maths subtracts feed timestamps from it), but a reader in
+    # Lagos reading "14:42" when their clock says 15:42 is being misled.
+    lines.append(
+        f"Generated: {report.generated_at.astimezone().strftime('%d %b %Y, %H:%M')}"
+    )
     lines.append("")
 
     # -- headline: what is wrong, first ------------------------------------

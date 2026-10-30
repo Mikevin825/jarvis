@@ -1,0 +1,32 @@
+[Unit]
+Description=JARVIS Background Sentinel — System monitoring and reminders
+Documentation=file:///home/kingmike/jarvis/SENTINEL.md
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/home/kingmike/jarvis/.venv/bin/python /home/kingmike/jarvis/jarvis/sentinel.py --once
+# For continuous monitoring, use:
+# ExecStart=/home/kingmike/jarvis/.venv/bin/python /home/kingmike/jarvis/jarvis/sentinel.py
+# --then manually send to background or use --daemon
+
+# Environment
+Environment=PATH=/home/kingmike/jarvis/.venv/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/home/kingmike/jarvis
+
+# Restart behavior
+Restart=on-failure
+RestartSec=30
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/kingmike/.jarvis/state
+
+# Standard output
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

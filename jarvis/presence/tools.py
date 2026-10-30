@@ -15,6 +15,7 @@ from . import (
     channel_summary,
     generate_status_report,
     render_analytics,
+    render_daily,
     site_summary,
 )
 
@@ -104,6 +105,20 @@ def presence_analytics(days: int = 30) -> str:
     report, and the output says so rather than printing zeros.
     """
     return render_analytics(days=days)
+
+
+def traffic_analytics(days: int = 30) -> str:
+    """Traffic per day — how many views a channel got each day, and each video's daily rate.
+
+    This is the day-granularity view: `presence_analytics` says whether the
+    total is moving, this says how much arrived on each individual day. It
+    needs at least two snapshots to say anything about a day at all.
+
+    Websites are included, but only if the site actually counts visitors — a
+    site with no analytics snippet has no visitor number to report, and this
+    says so rather than printing zero.
+    """
+    return render_daily(days=days)
 
 
 def presence_graph_sheet(days: int = 30) -> str:
@@ -207,6 +222,32 @@ def build() -> list[Tool]:
                 "required": [],
             },
             func=presence_analytics,
+        ),
+        Tool(
+            name="traffic_analytics",
+            description=(
+                "Use this for traffic per day rather than a growth trend: how "
+                "many views a YouTube channel got on each day, which day was "
+                "busiest, and each video's views-per-day rate. Also reports "
+                "website visitors per day when the site counts them. Call it "
+                "when the user asks how many people are using or watching "
+                "something, daily traffic, views per day, or 'how many came "
+                "today'."
+            ),
+            parameters={
+                "type": "OBJECT",
+                "properties": {
+                    "days": {
+                        "type": "INTEGER",
+                        "description": (
+                            "Optional. How many days of history to report on. "
+                            "Defaults to 30."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+            func=traffic_analytics,
         ),
         Tool(
             name="record_presence",

@@ -334,6 +334,15 @@ def main(argv: list[str] | None = None) -> int:
         help="print trends over time — views growth, upload rate, site uptime — and exit",
     )
     parser.add_argument(
+        "--daily",
+        dest="daily",
+        action="store_true",
+        help=(
+            "print traffic per day — views on each day, busiest day, and each "
+            "video's daily rate — and exit"
+        ),
+    )
+    parser.add_argument(
         "--graph-sheet",
         dest="graph_sheet",
         action="store_true",
@@ -601,6 +610,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    # -- traffic per day -------------------------------------------------------
+    if args.daily:
+        from .presence import render_daily
+
+        print(render_daily())
+        return 0
+
     # -- analytics: trends over time ------------------------------------------
     if args.analytics:
         from .presence import render_analytics
@@ -677,17 +693,21 @@ def main(argv: list[str] | None = None) -> int:
         from .voice import (
             SpeechError,
             TranscriptionError,
-            build_speaker,
+            build_speaker_with_fallback,
             build_transcriber,
         )
         from .voice.loop import VoiceConfig, VoiceLoop
 
         try:
             transcriber = build_transcriber(cfg.stt)
-            speaker = build_speaker(cfg.tts)
+            speaker = build_speaker_with_fallback(cfg.tts)
         except (TranscriptionError, SpeechError) as exc:
             print(f"cannot start voice: {exc}", file=sys.stderr)
             return 2
+
+        if speaker.provider != cfg.tts.provider:
+            # Same rule as speak mode: a substitution is announced, not hidden.
+            print(f"Voice output: using '{speaker.provider}' instead of '{cfg.tts.provider}'.")
 
         bridge = GalaxyBridge()
         loop = VoiceLoop(
@@ -721,17 +741,21 @@ def main(argv: list[str] | None = None) -> int:
             CaptureError,
             SpeechError,
             TranscriptionError,
-            build_speaker,
+            build_speaker_with_fallback,
             build_transcriber,
         )
         from .voice.loop import VoiceConfig, VoiceLoop
 
         try:
             transcriber = build_transcriber(cfg.stt)
-            speaker = build_speaker(cfg.tts)
+            speaker = build_speaker_with_fallback(cfg.tts)
         except (TranscriptionError, SpeechError) as exc:
             print(f"cannot start voice: {exc}", file=sys.stderr)
             return 2
+
+        if speaker.provider != cfg.tts.provider:
+            # Same rule as speak mode: a substitution is announced, not hidden.
+            print(f"Voice output: using '{speaker.provider}' instead of '{cfg.tts.provider}'.")
 
         bridge = GalaxyBridge()
         loop = VoiceLoop(
@@ -836,10 +860,15 @@ def main(argv: list[str] | None = None) -> int:
     _scripted_speaker = None
     _scripted_speaking = False
     if scripted and args.speak:
-        from .voice import SpeechError, build_speaker
+        from .voice import SpeechError, build_speaker_with_fallback
+
+        def _announce_switch(provider: str) -> None:
+            print(f"  (voice: switched to '{provider}')")
 
         try:
-            _scripted_speaker = build_speaker(cfg.tts)
+            _scripted_speaker = build_speaker_with_fallback(
+                cfg.tts, on_switch=_announce_switch
+            )
             _scripted_speaking = True
         except SpeechError as exc:
             print(f"Speak mode unavailable, continuing in text only: {exc}")
@@ -879,17 +908,28 @@ def main(argv: list[str] | None = None) -> int:
     speaker = None
     speaking = False
     if args.speak:
-        from .voice import SpeechError, build_speaker
+        from .voice import SpeechError, build_speaker_with_fallback
+
+        def _announce_switch(provider: str) -> None:
+            print(f"  (voice: switched to '{provider}')")
 
         try:
-            speaker = build_speaker(cfg.tts)
+            speaker = build_speaker_with_fallback(cfg.tts, on_switch=_announce_switch)
+        except SpeechError as exc:
+            print(f"Speak mode unavailable, continuing in text only: {exc}")
+        else:
             speaking = True
+            if speaker.provider != cfg.tts.provider:
+                # Never substitute silently: the user picked a voice, and
+                # silently hearing a different one reads as a bug.
+                print(
+                    f"Speak mode: '{cfg.tts.provider}' could not be used, "
+                    f"so replies will be read in '{speaker.provider}' instead."
+                )
             print(
                 "Speak mode: every reply is read aloud. "
                 "Press Enter during speech to skip; /speak off to silence."
             )
-        except SpeechError as exc:
-            print(f"Speak mode unavailable, continuing in text only: {exc}")
 
     # -- voice verification ---------------------------------------------------
     heartbeat = None
@@ -933,6 +973,15 @@ def main(argv: list[str] | None = None) -> int:
                 f"Heartbeat: running ({len(heartbeat.checks)} checks, "
                 f"quiet hours {heartbeat.quiet.describe()})."
             )
+
+            # Start reminder scheduler so notifications work immediately
+            from .tools.reminders import start_scheduler
+            start_scheduler()
+
+    # Start reminder scheduler for non-interactive mode too
+    if not cfg.heartbeat.enabled or args.no_heartbeat:
+        from .tools.reminders import start_scheduler
+        start_scheduler()
 
     pending = inbox.count_pending()
     if pending:

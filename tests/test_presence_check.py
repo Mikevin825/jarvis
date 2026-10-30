@@ -39,14 +39,16 @@ def _video(days_ago: int, views: int = 10) -> Video:
 
 
 @pytest.fixture
-def check(tmp_path, monkeypatch):
+def check(state_dir, monkeypatch):
     """A PresenceCheck with a clean state that never touches the real file.
 
     `PresenceState.load`'s default path is bound at class-definition time, so
     monkeypatching the module constant would not help — the state is reset
-    directly and saving is stubbed out instead.
+    directly and saving is stubbed out instead. `state_dir` redirects
+    `paths.STATE_DIR`, which is what keeps the snapshot `record()` writes out
+    of the live history database.
     """
-    monkeypatch.setattr("jarvis.heartbeat.presence_check.STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr("jarvis.heartbeat.presence_check.STATE_FILE", state_dir / "state.json")
     instance = PresenceCheck(86400, {})
     instance.state = PresenceState()
     monkeypatch.setattr(PresenceState, "save", lambda self, path=None: None)

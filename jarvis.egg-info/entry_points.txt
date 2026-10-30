@@ -1,0 +1,6 @@
+[console_scripts]
+jarvis = jarvis.cli:main
+jarvis-sentinel = jarvis.sentinel:main
+
+[gui_scripts]
+jarvis-desktop = jarvis.desktop.__main__:main

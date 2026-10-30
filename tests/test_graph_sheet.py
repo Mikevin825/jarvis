@@ -121,11 +121,13 @@ class TestSiteMetrics:
 
 
 @pytest.fixture
-def db(tmp_path, monkeypatch):
-    path = tmp_path / "history.db"
-    monkeypatch.setattr(history, "DB_PATH", path)
-    monkeypatch.setattr(analytics.history, "DB_PATH", path)
-    return path
+def db(state_dir):
+    """The history database, inside the test's temporary state directory.
+
+    `state_dir` redirects `paths.STATE_DIR`, which `history` reads per call —
+    so the database follows the fixture instead of being pinned by hand.
+    """
+    return state_dir / "presence-history.db"
 
 
 def _site(up: bool = True, ms: int = 200, size: int = 5000, words: int = 300) -> SiteInfo:

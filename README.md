@@ -187,6 +187,19 @@ The reply is spoken as a whole once it is finished, not word by word — a
 streamed answer read aloud as it arrives sounds broken. Text typed while he is
 speaking is kept and becomes your next message rather than being lost.
 
+**A provider that is configured is not a provider that works.** An API key runs
+out of quota mid-month and a free service changes its endpoint without notice, so
+the voice layer keeps a fallback chain: `edge` → `piper` → `espeak`. The first
+sentence that the configured provider cannot speak moves to the next one for the
+rest of the session, and **the switch is announced** — silently hearing a
+different voice reads as a bug. `tts.providers` in `config.yaml` holds each
+provider's own voice and rate, so a fallback uses the voice you picked for it
+rather than a default.
+
+`piper` is free, offline and neural, and needs no key — it is the safest voice
+to fall back to. `espeak` is last because it is robotic, but it needs nothing at
+all: no key, no network, no model.
+
 ## Design rules
 
 1. Brain works in plain text before any audio exists.
@@ -246,6 +259,32 @@ percentage. History is stored in `state/presence-history.db` (SQLite) and
 appended by the heartbeat check each day, so trends appear after a few days.
 `record_presence` stores a snapshot on demand if you want to build history
 faster.
+
+### Traffic per day
+
+`--analytics` says whether the total is moving. For how much arrived on each
+individual day:
+
+```bash
+.venv/bin/python -m jarvis --daily
+```
+
+It reports the channel's views per day — the total, the daily average, the
+busiest and slowest day, a day-by-day series, and each video's views-per-day
+rate. The arithmetic lives in `jarvis/presence/daily.py`, kept free of SQL so it
+is directly testable.
+
+Two honest limits, both stated in the output rather than papered over:
+
+* **Views, not people.** YouTube's feed counts views, so a day with 3 views may
+  be 3 people or one person watching three times. The feed cannot say.
+* **Websites need a traffic source.** A site with no analytics snippet has no
+  visitor count to read, and the report says so instead of printing zero — a
+  zero reads as "nobody visited" when the truth is "nobody counted".
+
+A day of traffic needs two snapshots, so the first snapshot after a gap
+establishes the baseline rather than a day. `history.channel_video_views`
+includes the last snapshot *before* the window for exactly that reason.
 
 ### Graph sheet
 

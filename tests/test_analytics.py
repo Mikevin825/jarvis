@@ -22,12 +22,13 @@ CHANNEL_ID = "UCtest"
 
 
 @pytest.fixture
-def db(tmp_path, monkeypatch):
-    """Point the history database at a temp file and start empty."""
-    path = tmp_path / "history.db"
-    monkeypatch.setattr(history, "DB_PATH", path)
-    monkeypatch.setattr(analytics.history, "DB_PATH", path)
-    return path
+def db(state_dir):
+    """The history database, inside the test's temporary state directory.
+
+    `state_dir` redirects `paths.STATE_DIR`, which `history` reads per call —
+    so the database follows the fixture instead of being pinned by hand.
+    """
+    return state_dir / "presence-history.db"
 
 
 def _video(video_id: str, title: str, views: int, days_ago: int = 30) -> Video:
@@ -174,3 +175,55 @@ class TestTitles:
         _record(0, [_video("v1", "One", 10)])
         names = history.channel_names()
         assert names[CHANNEL_ID] == "Test Channel"
+
+
+# -- per-day traffic --------------------------------------------------------
+
+
+class TestDailyReport:
+    def test_says_so_when_there_is_no_history(self, db):
+        assert "No history recorded yet" in analytics.render_daily()
+
+    def test_a_single_snapshot_is_a_baseline_not_a_day(self, db):
+        _record(0, [_video("v1", "One", 100)])
+
+        text = analytics.render_daily(days=30)
+        assert "not a day of traffic" in text
+
+    def test_growth_is_reported_per_day(self, db):
+        _record(2, [_video("v1", "One", 100)])
+        _record(0, [_video("v1", "One", 160)])
+
+        text = analytics.render_daily(days=30)
+        assert "60 in total" in text
+        assert "30.0/day" in text
+
+    def test_a_video_first_seen_in_the_window_is_named_not_dropped(self, db):
+        """A new upload has one sighting, so it cannot be a day of traffic —
+        but it is the biggest event in the window and must still be visible."""
+        _record(5, [_video("v1", "Old", 100)])
+        _record(0, [_video("v1", "Old", 100), _video("v2", "Brand new", 40)])
+
+        text = analytics.render_daily(days=30)
+        assert "Brand new" in text
+        assert "40 views at first sighting" in text
+        # It must not be smuggled into the day series as if it were measured.
+        assert "40/day" not in text
+        assert "none recorded" in text
+
+    def test_a_flat_window_says_none_rather_than_busiest_zero(self, db):
+        _record(2, [_video("v1", "One", 100)])
+        _record(0, [_video("v1", "One", 100)])
+
+        text = analytics.render_daily(days=30)
+        assert "none recorded" in text
+        assert "Busiest day" not in text
+
+    def test_websites_without_a_traffic_source_say_so(self, db):
+        _record(0, [_video("v1", "One", 10)])
+
+        text = analytics.render_daily(days=30)
+        assert "no traffic source is configured" in text
+        # And it must not invent a zero to fill the gap.
+        assert "0 visitors" not in text
+

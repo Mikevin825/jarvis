@@ -28,9 +28,14 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from ..paths import STATE_DIR
+from .. import paths
 
-DB_PATH = STATE_DIR / "presence-history.db"
+DB_NAME = "presence-history.db"
+
+# The import-time default, kept only so a caller can tell "pinned" apart from
+# "not pinned". The live path is resolved per call by `_db_path`.
+_DEFAULT_DB_PATH = paths.STATE_DIR / DB_NAME
+DB_PATH = _DEFAULT_DB_PATH
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -85,10 +90,30 @@ CREATE INDEX IF NOT EXISTS idx_site_time
 """
 
 
+def _db_path() -> Path:
+    """The history database, resolved on every call.
+
+    `paths.STATE_DIR` is read live rather than captured once at import. The
+    test suite redirects that constant to keep tests away from real state, and
+    a path frozen at import time meant `test_presence_check` wrote its fixtures
+    (`bad.test`, `good.test`, `UCquiet`, `UCfresh`) straight into the live
+    database — which then showed up in the user's analytics.
+
+    `DB_PATH` stays as a module attribute so a caller can pin the module to
+    one specific file; a pinned value (anything other than the import-time
+    default) wins over the live lookup.
+    """
+    pinned = globals().get("DB_PATH")
+    if pinned is not None and Path(pinned) != _DEFAULT_DB_PATH:
+        return Path(pinned)
+    return paths.STATE_DIR / DB_NAME
+
+
 def _connect() -> sqlite3.Connection:
     """Open the database, creating it and the schema if needed."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
+    db_path = _db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
     return conn
@@ -218,13 +243,19 @@ def date_range() -> tuple[datetime | None, datetime | None]:
 
 
 def channel_video_views(
-    channel_id: str, days: int | None = None
+    channel_id: str, days: int | None = None, include_baseline: bool = False
 ) -> dict[str, list[tuple[datetime, int]]]:
     """Views over time for every video on one channel.
 
     Returns `{video_id: [(when, views), ...]}` ordered oldest first, so a
     caller can plot growth without sorting. This is the core of the analytics:
     it is the only query that answers "is this video still getting views".
+
+    `include_baseline` also returns the last snapshot *before* the window. The
+    first snapshot inside a window has nothing to be measured against, so
+    without it the first day of every per-day figure is silently dropped. The
+    extra point is a starting value, not a day — differencing consecutive
+    points is exactly what makes that work.
     """
     sql = """
         SELECT v.video_id, v.views, s.taken_at
@@ -234,8 +265,17 @@ def channel_video_views(
     """
     params: list = [channel_id]
     if days is not None:
-        sql += " AND s.taken_at >= ?"
-        params.append(_days_ago(days).isoformat())
+        cutoff = _days_ago(days).isoformat()
+        if include_baseline:
+            sql += (
+                " AND s.taken_at >= COALESCE("
+                " (SELECT taken_at FROM snapshots WHERE taken_at < ?"
+                "  ORDER BY taken_at DESC LIMIT 1), ?)"
+            )
+            params.extend([cutoff, cutoff])
+        else:
+            sql += " AND s.taken_at >= ?"
+            params.append(cutoff)
     sql += " ORDER BY s.taken_at ASC"
 
     with _db() as conn:

@@ -13,6 +13,7 @@ from ..config import ConfigError
 from ..desktop import DesktopPanel, GuiGate
 from ..paths import AUDIT_FILE, INBOX_FILE, PAUSE_FILE, SCHEDULE_FILE
 from ..providers import ProviderError
+from ..tools.reminders import start_scheduler
 from ..voice import SpeechError, TranscriptionError, build_speaker, build_transcriber
 from ..voice.keys import KeyCombo
 from ..voice.loop import VoiceConfig, VoiceLoop
@@ -21,6 +22,10 @@ from ..voice.loop import VoiceConfig, VoiceLoop
 def main(argv: list[str] | None = None) -> int:
     from ..audit import AuditLog
     from ..heartbeat import Heartbeat, Inbox, Schedule
+
+    # Start the reminder scheduler so notifications work immediately
+    # when reminders become due (even before any reminder is set)
+    start_scheduler()
 
     # The panel needs the gate before the brain is built, because the gate is
     # attached to the registry the brain runs tools through. A tiny stand-in is

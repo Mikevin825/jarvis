@@ -10,13 +10,16 @@ from dataclasses import replace
 
 from ..memory import MemoryStore
 from ..presence import tools as presence_tools
-from . import apps, browser, clock, files, memory, messages, notes, reminders, system, weather, web, whatsapp
+from . import apps, browser, clock, external, files, member_consultation, memory, messages, notes, reminders, system, weather, web, whatsapp
 from .base import Tool, ToolError, ToolRegistry, ToolResult
 
 __all__ = ["Tool", "ToolError", "ToolRegistry", "ToolResult", "build_registry"]
 
 # Modules whose tools need no external state. One line per capability, forever.
-_MODULES = (clock, weather, notes, apps, messages, files, system, browser, reminders, presence_tools, web, whatsapp)
+# CAUTION: external module contains powerful, gated tools that can close apps,
+# run arbitrary commands, access any file, and interact with the GUI. All are
+# consequential and require explicit user confirmation.
+_MODULES = (clock, weather, notes, apps, messages, files, system, browser, reminders, presence_tools, web, whatsapp, external, member_consultation)
 
 
 def build_registry(
@@ -50,6 +53,11 @@ def build_registry(
         from ..board.tool import build as build_board
         for tool in build_board(provider=provider):
             registry.register(tool)
+
+    # Member consultation tools need a provider to invoke the model
+    if provider is not None:
+        from . import member_consultation
+        member_consultation.set_provider(provider)
 
     # Apply the config-level posture last, so it can adjust any tool.
     for name in extra_gated:

@@ -3,15 +3,24 @@
 One job: give me text, speak it aloud. Behind a seam so the voice or the provider
 can change in one place — the same discipline the brain provider follows.
 
-Two implementations:
+Providers:
 
 * `elevenlabs` — natural voices, streams. Needs ELEVENLABS_API_KEY.
+* `fish`       — high-quality free neural voices (s2.1-pro-free). Needs FISH_API_KEY.
+* `edge`       — free Microsoft neural voices. No key, needs network.
+* `piper`      — fully offline neural voices. No key, no network.
 * `espeak`     — local, instant, robotic. No key, no network. Good enough to
   build and verify the whole voice loop before spending anything.
+
+A configured provider is not the same as a working one: a key runs out of quota
+and a free service changes its endpoint. `build_speaker_with_fallback` keeps a
+turn speakable when that happens, and says which voice it settled on — a silent
+substitution would leave the user thinking their chosen voice still works.
 """
 
 from __future__ import annotations
 
+import json as jsonlib
 import shutil
 import subprocess
 import tempfile
@@ -23,6 +32,40 @@ import httpx
 
 class SpeechError(RuntimeError):
     """The text could not be spoken. Safe to show a human."""
+
+
+def _elevenlabs_rejection(response) -> SpeechError:
+    """Turn an ElevenLabs 401/403 into the complaint that fits.
+
+    ElevenLabs answers 401 to more than a bad key: an exhausted character quota
+    and a key missing a scope arrive the same way. Only the body's `detail.code`
+    separates them, and telling a user their key is broken when it is their
+    quota sends them to fix the wrong thing — verified here: a perfectly valid
+    key returns 401 `quota_exceeded` once the free tier runs out.
+    """
+    code = None
+    try:
+        # A streaming response has not read its body yet, and `.json()` on one
+        # raises rather than reading it — so read first, whatever the response.
+        raw = response.read()
+        code = (jsonlib.loads(raw).get("detail") or {}).get("code")
+    except Exception:  # noqa: BLE001 - a body we cannot read is not worth failing over
+        code = None
+
+    if code == "quota_exceeded":
+        return SpeechError(
+            "ElevenLabs quota is used up — this request needs characters and "
+            "none remain. Add credits or upgrade at elevenlabs.io, or set "
+            "tts.provider in config.yaml: piper is free and works offline."
+        )
+    if code == "missing_permissions":
+        return SpeechError(
+            "The ElevenLabs key is missing a permission this call needs. "
+            "Create a new key with the required scopes at elevenlabs.io."
+        )
+    return SpeechError(
+        "ElevenLabs rejected the key. Check ELEVENLABS_API_KEY in .env."
+    )
 
 
 class Speaker(Protocol):
@@ -300,9 +343,7 @@ class ElevenLabsSpeaker(_SubprocessSpeaker):
             raise SpeechError(f"Could not reach ElevenLabs: {exc}") from exc
 
         if response.status_code in (401, 403):
-            raise SpeechError(
-                "ElevenLabs rejected the key. Check ELEVENLABS_API_KEY in .env."
-            )
+            raise _elevenlabs_rejection(response)
         if response.status_code != 200:
             raise SpeechError(
                 f"ElevenLabs returned {response.status_code}: {response.text[:200]}"
@@ -343,9 +384,7 @@ class ElevenLabsSpeaker(_SubprocessSpeaker):
                 timeout=self.timeout,
             ) as response:
                 if response.status_code in (401, 403):
-                    raise SpeechError(
-                        "ElevenLabs rejected the key. Check ELEVENLABS_API_KEY in .env."
-                    )
+                    raise _elevenlabs_rejection(response)
                 if response.status_code == 422:
                     raise SpeechError(
                         f"ElevenLabs rejected the request for voice "
@@ -377,6 +416,88 @@ class ElevenLabsSpeaker(_SubprocessSpeaker):
             path.unlink(missing_ok=True)
 
 
+class FishTtsSpeaker(_SubprocessSpeaker):
+    """Fish Audio TTS via REST API.
+
+    Free tier uses model `s2.1-pro-free` (no credit card needed).
+    Quality is high, comparable to ElevenLabs. Requires FISH_API_KEY.
+
+    The API returns raw MP3 bytes — no base64 wrapping needed.
+    """
+
+    BASE = "https://api.fish.audio/v1/tts"
+    DEFAULT_MODEL = "s2.1-pro-free"
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        voice: str | None = None,
+        model: str = DEFAULT_MODEL,
+        speed: float = 1.0,
+        volume: float = 0.0,
+        normalize: bool = True,
+    ) -> None:
+        super().__init__()
+        self._api_key = api_key
+        self.voice = voice
+        self.model = model
+        self.speed = speed
+        self.volume = volume
+        self.normalize = normalize
+
+    def speak(self, text: str) -> None:
+        text = text.strip()
+        if not text:
+            return
+
+        body: dict = {"text": text, "format": "mp3"}
+        if self.voice:
+            body["reference_id"] = self.voice
+        if self.speed != 1.0:
+            body["prosody"] = {"speed": self.speed}
+        if self.volume != 0.0:
+            body["prosody"] = body.get("prosody", {})
+            body["prosody"]["volume"] = self.volume
+        if not self.normalize:
+            body["normalize"] = False
+
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            path = Path(tmp.name)
+
+        try:
+            response = httpx.post(
+                self.BASE,
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                    "model": self.model,
+                },
+                json=body,
+                timeout=120.0,
+            )
+            if response.status_code == 401:
+                raise SpeechError("Fish Audio rejected the key. Check FISH_API_KEY in .env.")
+            if response.status_code == 402:
+                raise SpeechError("Fish Audio quota exhausted. Add credit at fish.audio.")
+            if response.status_code == 429:
+                raise SpeechError("Fish Audio rate limit reached. Retry later.")
+            if response.status_code != 200:
+                raise SpeechError(
+                    f"Fish Audio returned {response.status_code}: {response.text[:200]}"
+                )
+            path.write_bytes(response.content)
+            if not path.exists() or path.stat().st_size == 0:
+                raise SpeechError("Fish Audio returned no audio.")
+            self._play(path)
+        except httpx.TimeoutException as exc:
+            raise SpeechError("Fish Audio did not respond in time.") from exc
+        except httpx.HTTPError as exc:
+            raise SpeechError(f"Could not reach Fish Audio: {exc}") from exc
+        finally:
+            path.unlink(missing_ok=True)
+
+
 def build_speaker(cfg) -> Speaker:
     """Construct the speaker named in the config."""
     if cfg.provider == "elevenlabs":
@@ -391,6 +512,22 @@ def build_speaker(cfg) -> Speaker:
             voice_id=cfg.voice,
             model=cfg.model,
             timeout_seconds=cfg.timeout_seconds,
+        )
+
+    if cfg.provider == "fish":
+        if not cfg.api_key:
+            raise SpeechError(
+                "tts.provider is 'fish' but no API key was found.\n"
+                "  Fix: set FISH_API_KEY in .env,\n"
+                "  or set tts.provider: edge in config.yaml for a free neural voice."
+            )
+        return FishTtsSpeaker(
+            cfg.api_key,
+            voice=cfg.voice,
+            model=cfg.model or FishTtsSpeaker.DEFAULT_MODEL,
+            speed=cfg.speed,
+            volume=cfg.volume_db,
+            normalize=cfg.normalize,
         )
 
     if cfg.provider == "edge":
@@ -412,3 +549,140 @@ def build_speaker(cfg) -> Speaker:
         return EspeakSpeaker(voice=cfg.voice, speed=int(cfg.rate))
 
     raise SpeechError(f"unknown tts.provider: {cfg.provider!r}")
+
+
+# Order tried when the configured provider cannot speak. fish before edge:
+# both are network-dependent, but fish is neural-quality (s2.1-pro-free); edge is
+# also free but can break unpredictably. Both before piper since they are faster.
+# espeak last: offline but robotic. When a provider is added to the fallback chain,
+# it should be network-first if it requires no key; providers that require keys
+# (fish, elevenlabs) are tried only when explicitly configured.
+FALLBACK_ORDER = ("edge", "piper", "espeak")
+
+
+def _build_named(cfg, provider: str) -> Speaker:
+    """Build one specific provider, honouring the settings configured for it."""
+    block = (cfg.providers or {}).get(provider) or {}
+
+    if provider == "edge":
+        return EdgeTtsSpeaker(
+            voice=block.get("voice", "en-GB-RyanNeural"),
+            rate=block.get("rate_str", "+0%"),
+            volume=block.get("volume", "+0%"),
+            pitch=block.get("pitch", "+0Hz"),
+        )
+    if provider == "piper":
+        return PiperSpeaker(
+            voice=block.get("voice", "en_GB-alan-medium"),
+            voices_dir=block.get("voices_dir"),
+            length_scale=float(block.get("length_scale", 1.0)),
+        )
+    if provider == "espeak":
+        return EspeakSpeaker(
+            voice=block.get("voice", "en-gb"),
+            speed=int(block.get("rate", 165)),
+        )
+    if provider == "fish":
+        return FishTtsSpeaker(
+            block.get("api_key", ""),
+            voice=block.get("voice"),
+            model=block.get("model", FishTtsSpeaker.DEFAULT_MODEL),
+            speed=block.get("speed", 1.0),
+            volume=block.get("volume_db", 0.0),
+            normalize=block.get("normalize", True),
+        )
+    raise SpeechError(f"unknown tts.provider: {provider!r}")
+
+
+class FallbackSpeaker:
+    """Speaks with the configured provider, and switches permanently on failure.
+
+    A provider can be constructed and still fail on its first real sentence:
+    the character quota runs out mid-month, a free service changes its endpoint
+    without notice. Retrying the same provider every turn would fail every turn,
+    so the first failure moves to the next provider for the rest of the session.
+
+    Fallbacks are built lazily, only when one is actually needed — piper loads a
+    model and edge-tts imports a dependency, and neither should be paid for on a
+    session where the configured voice works.
+
+    `on_switch` runs once, when a fallback takes over, so the caller can say so
+    out loud. A silent substitution reads as a bug to the person listening.
+    """
+
+    def __init__(self, primary: Speaker, name: str, cfg, on_switch=None) -> None:
+        self._speaker = primary
+        self._name = name
+        self._cfg = cfg
+        self._on_switch = on_switch
+        self._tried: set[str] = set()
+        self.switched_to: str | None = None
+
+    @property
+    def provider(self) -> str:
+        """The provider actually in use — which may no longer be the configured one."""
+        return self._name
+
+    def speak(self, text: str) -> None:
+        try:
+            self._speaker.speak(text)
+            return
+        except SpeechError:
+            pass  # the configured voice failed; try the alternatives
+
+        for provider in FALLBACK_ORDER:
+            if provider in self._tried or provider == self._name:
+                continue
+            self._tried.add(provider)
+            try:
+                candidate = _build_named(self._cfg, provider)
+                candidate.speak(text)
+            except SpeechError:
+                continue
+            self._take_over(provider, candidate)
+            return
+
+        raise SpeechError(
+            f"no text-to-speech provider could speak this reply "
+            f"(tried {self._name} and {len(self._tried)} alternative(s))."
+        )
+
+    def stop(self) -> None:
+        self._speaker.stop()
+
+    def _take_over(self, provider: str, speaker: Speaker) -> None:
+        self._speaker = speaker
+        self._name = provider
+        self.switched_to = provider
+        if self._on_switch is not None:
+            self._on_switch(provider)
+
+
+def build_speaker_with_fallback(cfg, on_switch=None) -> Speaker:
+    """A speaker that keeps working when the configured provider cannot.
+
+    Construction is attempted first, so a missing key or an unknown provider
+    falls back immediately. A provider that builds but fails at speak time is
+    handled by `FallbackSpeaker` on the first real sentence.
+
+    Returns the speaker; its `.provider` is the provider actually in use.
+    """
+    try:
+        primary = build_speaker(cfg)
+    except SpeechError as first_error:
+        # Nothing configured works, so start from the first alternative.
+        problems = [f"{cfg.provider}: {first_error}"]
+        for provider in FALLBACK_ORDER:
+            try:
+                speaker = FallbackSpeaker(
+                    _build_named(cfg, provider), provider, cfg, on_switch
+                )
+            except SpeechError as exc:
+                problems.append(f"{provider}: {exc}")
+                continue
+            return speaker
+        raise SpeechError(
+            "No text-to-speech provider could be built.\n  " + "\n  ".join(problems)
+        )
+
+    return FallbackSpeaker(primary, cfg.provider, cfg, on_switch)

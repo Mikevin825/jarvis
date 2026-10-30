@@ -15,7 +15,13 @@ from jarvis.presence import youtube as yt_mod
 from jarvis.presence.report import build_report, render_report
 from jarvis.presence.website import _linked_paths, _normalise
 from jarvis.htmltext import extract_title
-from jarvis.presence.youtube import Channel, Video, _channel_id_from_input, _parse_date
+from jarvis.presence.youtube import (
+    Channel,
+    Video,
+    _channel_id_from_input,
+    _parse_date,
+    _strip_reference_decoration,
+)
 
 
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
@@ -109,6 +115,129 @@ class TestChannelIdResolution:
 
         with pytest.raises(YouTubeError):
             resolve_channel("   ")
+
+
+# -- reference decoration ---------------------------------------------------
+#
+# The model has been observed handing back a channel reference in the shape it
+# read it — `@url:`https://…``` rather than the bare URL. The decoration is not
+# part of the channel, and leaving it in changes the handle the lookup keys on.
+
+
+class TestReferenceDecoration:
+    @pytest.mark.parametrize(
+        "given,expected",
+        [
+            ("@url:`https://www.youtube.com/@KingMike-w8s`",
+             "https://www.youtube.com/@KingMike-w8s"),
+            ("@url:https://www.youtube.com/@KingMike-w8s",
+             "https://www.youtube.com/@KingMike-w8s"),
+            ("`https://www.youtube.com/@KingMike-w8s`",
+             "https://www.youtube.com/@KingMike-w8s"),
+            ("'@KingMike-w8s'", "@KingMike-w8s"),
+            ("  https://www.youtube.com/@KingMike-w8s  ",
+             "https://www.youtube.com/@KingMike-w8s"),
+        ],
+    )
+    def test_decoration_is_stripped(self, given, expected):
+        assert _strip_reference_decoration(given) == expected
+
+    @pytest.mark.parametrize(
+        "given,expected",
+        [
+            ("@url:`https://www.youtube.com/channel/UCxtW2qSajDNxhBgdykn_H9A`",
+             "UCxtW2qSajDNxhBgdykn_H9A"),
+            ("`UCxtW2qSajDNxhBgdykn_H9A`", "UCxtW2qSajDNxhBgdykn_H9A"),
+        ],
+    )
+    def test_a_wrapped_channel_id_still_resolves(self, given, expected):
+        assert _channel_id_from_input(given) == expected
+
+    def test_a_clean_input_is_untouched(self):
+        """The strip is decoration-only; it must not alter a real value."""
+        clean = "https://www.youtube.com/channel/UCxtW2qSajDNxhBgdykn_H9A"
+        assert _strip_reference_decoration(clean) == clean
+
+    def test_an_empty_reference_is_still_refused(self):
+        from jarvis.presence.youtube import YouTubeError, resolve_channel
+
+        with pytest.raises(YouTubeError):
+            resolve_channel("@url:``")
+
+
+# -- video links are not channels -------------------------------------------
+#
+# `watch?v=…` used to resolve "successfully" to whatever channel YouTube
+# advertises on that page. Verified against the live site: a King Mike upload
+# resolved to a channel called "WATCH". Wrong data beats no data, so it is
+# refused — and refused before any fetch, so it costs nothing.
+
+
+class TestVideoReferences:
+    @pytest.mark.parametrize(
+        "given",
+        [
+            "https://www.youtube.com/watch?v=sH3cQWNYCfg",
+            "https://youtu.be/sH3cQWNYCfg",
+            "https://www.youtube.com/shorts/sH3cQWNYCfg",
+            "watch?v=sH3cQWNYCfg",
+            "@url:`https://www.youtube.com/watch?v=sH3cQWNYCfg`",
+        ],
+    )
+    def test_a_video_link_is_refused(self, given):
+        from jarvis.presence.youtube import YouTubeError, resolve_channel
+
+        with pytest.raises(YouTubeError, match="video link"):
+            resolve_channel(given)
+
+    def test_a_channel_link_is_not_caught_by_the_refusal(self):
+        """The check must not reject a real channel URL."""
+        from jarvis.presence.youtube import resolve_channel
+
+        assert (
+            resolve_channel("https://www.youtube.com/channel/UCxtW2qSajDNxhBgdykn_H9A")
+            == "UCxtW2qSajDNxhBgdykn_H9A"
+        )
+
+    def test_a_handle_is_not_caught_by_the_refusal(self):
+        from jarvis.presence.youtube import _looks_like_video
+
+        assert not _looks_like_video("@KingMike-w8s")
+        assert not _looks_like_video("KingMike-w8s")
+
+
+# -- a failing feed is not a missing channel ---------------------------------
+#
+# YouTube's feed endpoint returns 404 for "no such channel" *and* when the
+# service is having a problem. During a real outage, valid channels (including
+# TED) returned 404 and then 500. Telling the user their channel does not exist
+# over a transient failure is the one reading that causes real panic.
+
+
+class TestFeedUnavailable:
+    class _Response:
+        def __init__(self, status_code: int) -> None:
+            self.status_code = status_code
+            self.content = b""
+            self.text = ""
+
+    @pytest.mark.parametrize("status", [404, 500, 503])
+    def test_the_error_does_not_claim_the_channel_is_missing(self, monkeypatch, status):
+        import jarvis.presence.youtube as mod
+
+        monkeypatch.setattr(
+            mod.httpx, "get", lambda *a, **kw: TestFeedUnavailable._Response(status)
+        )
+        monkeypatch.setattr(mod, "resolve_channel", lambda channel: "UCdxDJnThwNXAKgFNa728F9w")
+
+        with pytest.raises(mod.YouTubeError) as excinfo:
+            mod.fetch_channel("@KingMike-w8s")
+
+        message = str(excinfo.value)
+        assert "does not exist" not in message
+        assert "No channel exists" not in message
+        # It must still say what happened, and what to do about it.
+        assert str(status) in message
 
 
 # -- RSS date parsing -------------------------------------------------------

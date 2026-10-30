@@ -9,7 +9,7 @@ find yourself writing agent logic in this package, that is the wrong turn.
 
 from .audio import CaptureError, Recorder
 from .stt import Transcriber, TranscriptionError, build_transcriber
-from .tts import Speaker, SpeechError, build_speaker
+from .tts import Speaker, SpeechError, build_speaker, build_speaker_with_fallback
 
 __all__ = [
     "CaptureError",
@@ -19,5 +19,6 @@ __all__ = [
     "Transcriber",
     "TranscriptionError",
     "build_speaker",
+    "build_speaker_with_fallback",
     "build_transcriber",
 ]
